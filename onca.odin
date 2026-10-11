@@ -1,115 +1,126 @@
 #+feature dynamic-literals
 package onca
 
-move_bytes    :: #load("move.wav")
-capture_bytes :: #load("capture.wav")
-bgm_bytes     :: #load("bgm.wav")
-font_bytes    :: #load("Black Animal.ttf")
+main :: proc() {
 
-// Constants
-CONFIG_PATH :: "onca.cfg"
+    pieces:    [dynamic; 15] Entity
+    vertices:  [dynamic; 32] rl.Vector2
 
-configs := map[string]u32 {
-    "scale"            = 90,
-    "screen_width"     = 1200,
-    "screen_height"    = 800,
+	init_game()
+	defer close_game()
 
-    "border_size"      = 8,
-    "line_size"        = 4,
-    "vertex_size"      = 10,
-    "dog_size"         = 32,
-    "jaguar_size"      = 25,
+    assets := load_assets()
+    defer unload_assets(assets)
 
-    "bg_color"         = 0x160802ff,
-    "fg_color"         = 0xd8a71eff,
-    "button_bg_color"  = 0x160802ff,
-    "button_fg_color"  = 0xd8a71eff,
-    "dog_color"        = 0x473d2fff,
-    "jaguar_color"     = 0xf2cf46ff,
-    "highlight_color"  = 0x0fa0b0ff,
-    "last_move_color"  = 0x10aa10ff,
-}
+    rl.PlayMusicStream(assets.bgm)
 
-SCALE:         f32 = cast(f32) configs["scale"] / 100
-SCREEN_WIDTH:  f32 = cast(f32) configs["screen_width"]
-SCREEN_HEIGHT: f32 = cast(f32) configs["screen_height"]
-UNIT:          f32 = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
-BOARD_WIDTH:   f32 = UNIT * 4
-BOARD_HEIGHT:  f32 = UNIT * 6
+    for !rl.WindowShouldClose() {
+		read_configs_noblocking()
+	    // rl.UpdateMusicStream(assets.bgm)
 
-mouse:        rl.Vector2
-rules_rect:   rl.Rectangle
-restart_rect: rl.Rectangle
+	    adjacencies_and_captures: Adjacency
+	    update(&pieces, &vertices, &adjacencies_and_captures, assets)
 
-State_Flags :: enum {
-	Button_Hover,
-	Should_Render_Rules,
-	Restart_Hover,
-	Should_Restart,
-	Dogs_Turn,
-	Last_Move_Was_Capture,
-	Dogs_Won,
-}
-flags: bit_set[State_Flags]
+	    rl.BeginDrawing()
+	    defer rl.EndDrawing()
 
-Entity_Kind :: enum {n, i, D, J}
-dragged_piece: Entity = {.n, {-1, -1}, {0, 0}}
-score: u8 = '0'
-
-jaguar_coord     := [2]int{2, 2}
-last_jaguar_move := [2]int{0, 12}
-last_dog_move    := [2]int{0,  0}
-
-INITIAL_BOARD := [7][5] Entity_Kind {
-    {.D, .D, .D, .D, .D},
-    {.D, .D, .D, .D, .D},
-    {.D, .D, .J, .D, .D},
-    {.n, .n, .n, .n, .n},
-    {.n, .n, .n, .n, .n},
-    {.i, .n, .n, .n, .i},
-    {.i, .n, .n, .n, .i},
-}
-
-BOARD := INITIAL_BOARD
-
-Entity :: struct {
-    kind:  Entity_Kind,
-    coord: [2]int,
-    pos:   rl.Vector2,
-}
-
-Adjacency :: [31]bit_set[0..<31]
-adjacencies: Adjacency
-
-coord_from_vert :: proc(idx: int) -> (x, y: int){
-    idx := clamp(idx, 0, 30)
-    switch {
-    case idx < 25: return idx/5, idx%5
-    case idx < 28: return 6, idx - 24
-    case:          return 5, idx - 27
+	    if .Should_Render_Rules in flags {
+		    render_rules(assets)
+	    } else {
+		    render_board(vertices[:], adjacencies_and_captures, assets)
+		    render_pieces(pieces[:])
+	    }
     }
 }
 
-vert_from_coord :: proc(x, y: int) -> (idx: int) {
-    x := clamp(x, 0, 6)
-    y := clamp(y, 0, 4)
-    switch x {
-    case 5: return 27  + y   // middle row -> 28..30
-    case 6: return 24  + y   // base row   -> 25..27
-    case:   return x*5 + y
+init_game :: proc() {
+    compute_adjacencies()
+
+    nbio.acquire_thread_event_loop()
+
+    rl.SetTargetFPS(60)
+    rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT});
+    rl.InitWindow(cast(i32) SCREEN_WIDTH, cast(i32) SCREEN_HEIGHT, "Onca")
+
+    rl.InitAudioDevice()
+}
+
+close_game :: proc() {
+    nbio.release_thread_event_loop()
+    rl.CloseWindow()
+    rl.CloseAudioDevice()
+}
+
+load_assets :: proc() -> Assets {
+	assets: Assets
+
+	// SFX
+    wave := rl.LoadWaveFromMemory(".wav", rawptr(raw_data(move_bytes)), cast(i32) len(move_bytes))
+    assets.sfx_move = rl.LoadSoundFromWave(wave)
+    rl.UnloadWave(wave)
+
+    wave = rl.LoadWaveFromMemory(".wav", rawptr(raw_data(capture_bytes)), cast(i32) len(capture_bytes))
+    assets.sfx_capture = rl.LoadSoundFromWave(wave)
+    rl.UnloadWave(wave)
+
+	// BGM
+    assets.bgm = rl.LoadMusicStreamFromMemory(".wav", rawptr(raw_data(bgm_bytes)), cast(i32) len(bgm_bytes))
+
+	// Font
+    codepointCount: i32 = 0
+    codepoints := rl.LoadCodepoints(
+    	" !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZÃ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~",
+    	&codepointCount
+    )
+    assets.font = rl.LoadFontFromMemory(".ttf", rawptr(raw_data(font_bytes)), cast(i32) len(font_bytes), 64, codepoints, codepointCount)
+    rl.UnloadCodepoints(codepoints)
+
+    return assets
+}
+
+unload_assets :: proc(assets: Assets) {
+    rl.UnloadSound(assets.sfx_move)
+    rl.UnloadSound(assets.sfx_capture)
+    rl.UnloadMusicStream(assets.bgm)
+    rl.UnloadFont(assets.font)
+}
+
+read_configs_noblocking :: proc() {
+    if err := nbio.tick(timeout=0); err != nil {
+	    log.errorf("nbio.tick: %v", err)
     }
-}
+    config_file_buffer: string
 
-link :: proc(a, b: int) {
-	adjacencies[a] += {b}
-	adjacencies[b] += {a}
-}
+	parse_config_file :: proc(_: rawptr, buf: []byte, err: nbio.Read_Entire_File_Error) {
+	    if err.value != nil {
+		    log.errorf("str(%q): %v: %v", CONFIG_PATH, err.operation, err.value)
+		    return
+	    }
 
-link_coords :: proc(a, b: [2]int) {
-    link(vert_from_coord(a.x, a.y), vert_from_coord(b.x, b.y))
+	    file := strings.trim(string(buf), " \n\t")
+
+	    for line in strings.split_lines(file) {
+
+		    config := strings.trim(line, " \n\t")
+		    if config == "" do continue
+		    pair   := strings.split(config, " ")
+		    number,_ := strconv.parse_int(slice.last(pair))
+		    configs[slice.first(pair)] = cast(u32) number
+	    }
+	}
+
+    nbio.read_entire_file(CONFIG_PATH, &config_file_buffer, parse_config_file)
 }
 
 compute_adjacencies :: proc() {
+	link :: proc(a, b: int) {
+		adjacencies[a] += {b}
+		adjacencies[b] += {a}
+	}
+
+	link_coords :: proc(a, b: [2]int) {
+	    link(vert_from_coord(a.x, a.y), vert_from_coord(b.x, b.y))
+	}
 
     // Square
    for v in 0 ..< 25 {
@@ -137,124 +148,23 @@ compute_adjacencies :: proc() {
     }
 }
 
-update_scaling :: proc() {
-    SCREEN_WIDTH  = cast(f32) rl.GetScreenWidth()
-    SCREEN_HEIGHT = cast(f32) rl.GetScreenHeight()
-    SCALE         = cast(f32) configs["scale"] / 100
-    UNIT          = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
-    BOARD_WIDTH   = UNIT * 4
-    BOARD_HEIGHT  = UNIT * 6
-}
-
-update_pieces :: proc(pieces: ^[dynamic; $M] Entity, vertices: []rl.Vector2) {
-
-    clear(pieces)
-
-    for kinds, x in BOARD {
-	    for _, y in kinds {
-
-		    e := BOARD[x][y]
-		    if e == .n || e == .i do continue
-
-		    pos: rl.Vector2
-		    idx := vert_from_coord(x,y)
-		    pos = vertices[idx]
-		    if e == .D {
-			    pos -= cast(f32) configs["dog_size"]/2
-		    }
-
-		    append(pieces, Entity{e, {x, y}, pos})
-	    }
+coord_from_vert :: proc(idx: int) -> (x, y: int){
+    idx := clamp(idx, 0, 30)
+    switch {
+    case idx < 25: return idx/5, idx%5
+    case idx < 28: return 6, idx - 24
+    case:          return 5, idx - 27
     }
 }
 
-index_over_piece :: proc(jag, dog: int) -> int {
-    idx := dog - (jag - dog)
-    if dog == 22 {
-	    switch jag {
-	    case 16 ..= 18, 25 ..= 27: idx -= 1
-	    }
-    } else if dog == 26 && (jag == 22 || jag == 29) {
-	    idx -= 1
-    } else if dog == 27 && (jag == 22 || jag == 30) {
-	    idx -= 2
+vert_from_coord :: proc(x, y: int) -> (idx: int) {
+    x := clamp(x, 0, 6)
+    y := clamp(y, 0, 4)
+    switch x {
+    case 5: return 27  + y   // middle row -> 28..30
+    case 6: return 24  + y   // base row   -> 25..27
+    case:   return x*5 + y
     }
-    return idx
-}
-
-index_captured :: proc(src, dst: int) -> int {
-    captured := min(src, dst) + abs((dst - src) / 2)
-    switch src + dst {
-    case 43, 51, 52:
-	    if src != 25 || dst != 25 {
-		    captured += 1
-	    }
-    }
-    return captured
-}
-
-compute_possible_captures :: proc() -> [31]bit_set[0..<31] {
-    adjacencies_and_captures := adjacencies
-    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
-
-    for i in adjacencies[jaguar] {
-	    x, y := coord_from_vert(i)
-	    if BOARD[x][y] == .D {
-		    new_move := index_over_piece(jaguar, i)
-		    x, y = coord_from_vert(new_move)
-		    if new_move in adjacencies[i] && BOARD[x][y] == .n {
-			    adjacencies_and_captures[jaguar] += {index_over_piece(jaguar, i)}
-		    }
-	    }
-    }
-    return adjacencies_and_captures
-}
-
-render_victory :: proc (kind: Entity_Kind, assets: Assets) {
-    mesg1, mesg2: cstring
-    color: rl.Color
-    switch kind {
-    case .J: mesg1 = "A ONCA"
-             mesg2 = "GANHOU"
-     color = rl.GetColor(configs["jaguar_color"])
-    case .D: mesg1 = "OS CÃES"
-             mesg2 = "GANHARAM"
-     color = rl.GetColor(configs["dog_color"])
-
-    case .n, .i: return
-    }
-
-    // Board Square
-    rect := rl.Rectangle {
-        SCREEN_WIDTH/2  - BOARD_WIDTH/2,
-        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
-        BOARD_WIDTH,
-        BOARD_WIDTH,
-    }
-    w := rect.x
-    h := rect.y + UNIT * 4.5
-    rl.DrawTextEx(assets.font, mesg1, rl.Vector2{w, h},      36, 0, color);
-    rl.DrawTextEx(assets.font, mesg2, rl.Vector2{w, h + 38}, 36, 0, color);
-}
-
-check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
-
-    if .Dogs_Turn in flags {
-	    return false
-    }
-
-    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
-
-    if .Dogs_Turn not_in flags {
-	    for vert in adjacencies_and_captures[jaguar] {
-		    x, y := coord_from_vert(vert)
-		    if BOARD[x][y] == .n {
-			    return false
-		    }
-	    }
-    }
-
-    return true
 }
 
 update :: proc (
@@ -419,6 +329,79 @@ update :: proc (
     update_pieces(pieces, vertices[:])
 }
 
+update_scaling :: proc() {
+    SCREEN_WIDTH  = cast(f32) rl.GetScreenWidth()
+    SCREEN_HEIGHT = cast(f32) rl.GetScreenHeight()
+    SCALE         = cast(f32) configs["scale"] / 100
+    UNIT          = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
+    BOARD_WIDTH   = UNIT * 4
+    BOARD_HEIGHT  = UNIT * 6
+}
+
+update_pieces :: proc(pieces: ^[dynamic; $M] Entity, vertices: []rl.Vector2) {
+
+    clear(pieces)
+
+    for kinds, x in BOARD {
+	    for _, y in kinds {
+
+		    e := BOARD[x][y]
+		    if e == .n || e == .i do continue
+
+		    pos: rl.Vector2
+		    idx := vert_from_coord(x,y)
+		    pos = vertices[idx]
+		    if e == .D {
+			    pos -= cast(f32) configs["dog_size"]/2
+		    }
+
+		    append(pieces, Entity{e, {x, y}, pos})
+	    }
+    }
+}
+
+index_over_piece :: proc(jag, dog: int) -> int {
+    idx := dog - (jag - dog)
+    if dog == 22 {
+	    switch jag {
+	    case 16 ..= 18, 25 ..= 27: idx -= 1
+	    }
+    } else if dog == 26 && (jag == 22 || jag == 29) {
+	    idx -= 1
+    } else if dog == 27 && (jag == 22 || jag == 30) {
+	    idx -= 2
+    }
+    return idx
+}
+
+index_captured :: proc(src, dst: int) -> int {
+    captured := min(src, dst) + abs((dst - src) / 2)
+    switch src + dst {
+    case 43, 51, 52:
+	    if src != 25 || dst != 25 {
+		    captured += 1
+	    }
+    }
+    return captured
+}
+
+compute_possible_captures :: proc() -> [31]bit_set[0..<31] {
+    adjacencies_and_captures := adjacencies
+    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
+
+    for i in adjacencies[jaguar] {
+	    x, y := coord_from_vert(i)
+	    if BOARD[x][y] == .D {
+		    new_move := index_over_piece(jaguar, i)
+		    x, y = coord_from_vert(new_move)
+		    if new_move in adjacencies[i] && BOARD[x][y] == .n {
+			    adjacencies_and_captures[jaguar] += {index_over_piece(jaguar, i)}
+		    }
+	    }
+    }
+    return adjacencies_and_captures
+}
+
 update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
 
     clear(vertices)
@@ -446,6 +429,26 @@ update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
 	    append(vertices, center)
 	    center += rl.Vector2{UNIT, 0}
     }
+}
+
+check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
+
+    if .Dogs_Turn in flags {
+	    return false
+    }
+
+    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
+
+    if .Dogs_Turn not_in flags {
+	    for vert in adjacencies_and_captures[jaguar] {
+		    x, y := coord_from_vert(vert)
+		    if BOARD[x][y] == .n {
+			    return false
+		    }
+	    }
+    }
+
+    return true
 }
 
 render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: [31]bit_set[0..<31], assets: Assets) {
@@ -687,24 +690,6 @@ render_last_move :: proc(vertices: []rl.Vector2) {
     }
 }
 
-parse_config_file :: proc(_: rawptr, buf: []byte, err: nbio.Read_Entire_File_Error) {
-    if err.value != nil {
-	    log.errorf("str(%q): %v: %v", CONFIG_PATH, err.operation, err.value)
-	    return
-    }
-
-    file := strings.trim(string(buf), " \n\t")
-
-    for line in strings.split_lines(file) {
-
-	    config := strings.trim(line, " \n\t")
-	    if config == "" do continue
-	    pair   := strings.split(config, " ")
-	    number,_ := strconv.parse_int(slice.last(pair))
-	    configs[slice.first(pair)] = cast(u32) number
-    }
-}
-
 render_rules :: proc(assets: Assets) {
     rl.ClearBackground(rl.GetColor(configs["bg_color"]))
 
@@ -743,6 +728,109 @@ render_rules :: proc(assets: Assets) {
     render_button("Voltar", cast(f32) configs["line_size"], rules_rect, .Button_Hover in flags, assets)
 }
 
+
+render_victory :: proc (kind: Entity_Kind, assets: Assets) {
+    mesg1, mesg2: cstring
+    color: rl.Color
+    switch kind {
+    case .J: mesg1 = "A ONCA"
+             mesg2 = "GANHOU"
+     color = rl.GetColor(configs["jaguar_color"])
+    case .D: mesg1 = "OS CÃES"
+             mesg2 = "GANHARAM"
+     color = rl.GetColor(configs["dog_color"])
+
+    case .n, .i: return
+    }
+
+    // Board Square
+    rect := rl.Rectangle {
+        SCREEN_WIDTH/2  - BOARD_WIDTH/2,
+        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
+        BOARD_WIDTH,
+        BOARD_WIDTH,
+    }
+    w := rect.x
+    h := rect.y + UNIT * 4.5
+    rl.DrawTextEx(assets.font, mesg1, rl.Vector2{w, h},      36, 0, color);
+    rl.DrawTextEx(assets.font, mesg2, rl.Vector2{w, h + 38}, 36, 0, color);
+}
+
+// Constants
+CONFIG_PATH :: "onca.cfg"
+
+configs := map[string]u32 {
+    "scale"            = 90,
+    "screen_width"     = 1200,
+    "screen_height"    = 800,
+
+    "border_size"      = 8,
+    "line_size"        = 4,
+    "vertex_size"      = 10,
+    "dog_size"         = 32,
+    "jaguar_size"      = 25,
+
+    "bg_color"         = 0x160802ff,
+    "fg_color"         = 0xd8a71eff,
+    "button_bg_color"  = 0x160802ff,
+    "button_fg_color"  = 0xd8a71eff,
+    "dog_color"        = 0x473d2fff,
+    "jaguar_color"     = 0xf2cf46ff,
+    "highlight_color"  = 0x0fa0b0ff,
+    "last_move_color"  = 0x10aa10ff,
+}
+
+SCALE:         f32 = cast(f32) configs["scale"] / 100
+SCREEN_WIDTH:  f32 = cast(f32) configs["screen_width"]
+SCREEN_HEIGHT: f32 = cast(f32) configs["screen_height"]
+UNIT:          f32 = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
+BOARD_WIDTH:   f32 = UNIT * 4
+BOARD_HEIGHT:  f32 = UNIT * 6
+
+mouse:        rl.Vector2
+rules_rect:   rl.Rectangle
+restart_rect: rl.Rectangle
+
+State_Flags :: enum {
+	Button_Hover,
+	Should_Render_Rules,
+	Restart_Hover,
+	Should_Restart,
+	Dogs_Turn,
+	Last_Move_Was_Capture,
+	Dogs_Won,
+}
+flags: bit_set[State_Flags]
+
+Entity_Kind :: enum {n, i, D, J}
+dragged_piece: Entity = {.n, {-1, -1}, {0, 0}}
+score: u8 = '0'
+
+jaguar_coord     := [2]int{2, 2}
+last_jaguar_move := [2]int{0, 12}
+last_dog_move    := [2]int{0,  0}
+
+INITIAL_BOARD := [7][5] Entity_Kind {
+    {.D, .D, .D, .D, .D},
+    {.D, .D, .D, .D, .D},
+    {.D, .D, .J, .D, .D},
+    {.n, .n, .n, .n, .n},
+    {.n, .n, .n, .n, .n},
+    {.i, .n, .n, .n, .i},
+    {.i, .n, .n, .n, .i},
+}
+
+BOARD := INITIAL_BOARD
+
+Entity :: struct {
+    kind:  Entity_Kind,
+    coord: [2]int,
+    pos:   rl.Vector2,
+}
+
+Adjacency :: [31]bit_set[0..<31]
+adjacencies: Adjacency
+
 Assets :: struct {
 	sfx_move:    rl.Sound,
 	sfx_capture: rl.Sound,
@@ -752,97 +840,10 @@ Assets :: struct {
 
 // assets: Assets
 
-load_assets :: proc() -> Assets {
-	assets: Assets
-
-	// SFX
-    wave := rl.LoadWaveFromMemory(".wav", rawptr(raw_data(move_bytes)), cast(i32) len(move_bytes))
-    assets.sfx_move = rl.LoadSoundFromWave(wave)
-    rl.UnloadWave(wave)
-
-    wave = rl.LoadWaveFromMemory(".wav", rawptr(raw_data(capture_bytes)), cast(i32) len(capture_bytes))
-    assets.sfx_capture = rl.LoadSoundFromWave(wave)
-    rl.UnloadWave(wave)
-
-	// BGM
-    assets.bgm = rl.LoadMusicStreamFromMemory(".wav", rawptr(raw_data(bgm_bytes)), cast(i32) len(bgm_bytes))
-
-	// Font
-    codepointCount: i32 = 0
-    codepoints := rl.LoadCodepoints(
-    	" !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZÃ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~",
-    	&codepointCount
-    )
-    assets.font = rl.LoadFontFromMemory(".ttf", rawptr(raw_data(font_bytes)), cast(i32) len(font_bytes), 64, codepoints, codepointCount)
-    rl.UnloadCodepoints(codepoints)
-
-    return assets
-}
-
-unload_assets :: proc(assets: Assets) {
-    rl.UnloadSound(assets.sfx_move)
-    rl.UnloadSound(assets.sfx_capture)
-    rl.UnloadMusicStream(assets.bgm)
-    rl.UnloadFont(assets.font)
-}
-
-init_game :: proc() {
-    compute_adjacencies()
-
-    nbio.acquire_thread_event_loop()
-
-    rl.SetTargetFPS(60)
-    rl.SetConfigFlags({.WINDOW_RESIZABLE, .MSAA_4X_HINT});
-    rl.InitWindow(cast(i32) SCREEN_WIDTH, cast(i32) SCREEN_HEIGHT, "Onca")
-
-    rl.InitAudioDevice()
-}
-
-close_game :: proc() {
-    nbio.release_thread_event_loop()
-    rl.CloseWindow()
-    rl.CloseAudioDevice()
-}
-
-read_configs_noblocking :: proc() {
-    if err := nbio.tick(timeout=0); err != nil {
-	    log.errorf("nbio.tick: %v", err)
-    }
-    config_file_buffer: string
-    nbio.read_entire_file(CONFIG_PATH, &config_file_buffer, parse_config_file)
-}
-
-main :: proc() {
-
-    pieces:    [dynamic; 15] Entity
-    vertices:  [dynamic; 32] rl.Vector2
-
-	init_game()
-	defer close_game()
-
-    assets := load_assets()
-    defer unload_assets(assets)
-
-    rl.PlayMusicStream(assets.bgm)
-
-    for !rl.WindowShouldClose() {
-		read_configs_noblocking()
-	    // rl.UpdateMusicStream(assets.bgm)
-
-	    adjacencies_and_captures: Adjacency
-	    update(&pieces, &vertices, &adjacencies_and_captures, assets)
-
-	    rl.BeginDrawing()
-	    defer rl.EndDrawing()
-
-	    if .Should_Render_Rules in flags {
-		    render_rules(assets)
-	    } else {
-		    render_board(vertices[:], adjacencies_and_captures, assets)
-		    render_pieces(pieces[:])
-	    }
-    }
-}
+move_bytes    :: #load("move.wav")
+capture_bytes :: #load("capture.wav")
+bgm_bytes     :: #load("bgm.wav")
+font_bytes    :: #load("Black Animal.ttf")
 
 import "core:fmt"
 import "core:nbio"
