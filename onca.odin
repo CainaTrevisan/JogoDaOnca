@@ -63,6 +63,7 @@ score: u8 = '0'
 
 jaguar_turn := true
 last_move_was_capture := false
+dogs_won := false
 
 jaguar_coord := [2]int{2, 2}
 
@@ -240,12 +241,14 @@ compute_possible_captures :: proc() -> [31]bit_set[0..<31] {
 
 render_victory :: proc (kind: Entity_Kind) {
 	mesg1, mesg2: cstring
+	color: rl.Color
 	switch kind {
 	case .J: mesg1 = "A ONCA"
-    	         mesg2 = "GANHOU"
-
+    	     mesg2 = "GANHOU"
+			 color = rl.GetColor(configs["jaguar_color"])
 	case .D: mesg1 = "OS CÃES"
-                 mesg2 = "GANHARAM"
+             mesg2 = "GANHARAM"
+			 color = rl.GetColor(configs["dog_color"])
 
 	case .n, .i: return
 	}
@@ -259,8 +262,8 @@ render_victory :: proc (kind: Entity_Kind) {
 	}
 	w := rect.x
 	h := rect.y + UNIT * 4.5
-        rl.DrawTextEx(font, mesg1, rl.Vector2{w, h},      36, 0, rl.LIGHTGRAY);
-        rl.DrawTextEx(font, mesg2, rl.Vector2{w, h + 38}, 36, 0, rl.LIGHTGRAY);
+        rl.DrawTextEx(font, mesg1, rl.Vector2{w, h},      36, 0, color);
+        rl.DrawTextEx(font, mesg2, rl.Vector2{w, h + 38}, 36, 0, color);
 }
 
 check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
@@ -312,7 +315,7 @@ update :: proc (
 	jaguar_size := cast(f32) configs["jaguar_size"]
 	dog_size    := cast(f32) configs["dog_size"]
 	vertex_size := cast(f32) configs["vertex_size"]
-        
+
         mouse = rl.GetMousePosition()
 
 	if rl.CheckCollisionPointRec(mouse, rules_rect) {
@@ -339,16 +342,11 @@ update :: proc (
 		last_dog_move         = {}
 		last_jaguar_move      = {}
 		jaguar_coord          = {2, 2}
-		should_restart        = false
 		dragged_piece         = {.n, {-1, -1}, {0, 0}}
+		should_restart        = false
+		dogs_won              = false
 		jaguar_turn           = true
 		last_move_was_capture = false
-	}
-
-	if score == '5' {
-		render_victory(.J)
-		render_last_move(vertices[:])
-		return
 	}
 
 	adjacencies_and_captures^ = compute_possible_captures()
@@ -363,7 +361,7 @@ update :: proc (
 	}
 
 	if check_if_dogs_won(adjacencies_and_captures[:]) {
-		render_victory(.D)
+		dogs_won = true
 		return
 	}
 
@@ -588,6 +586,17 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: [31]bit_s
 
 	render_button("Regras",    cast(f32) configs["line_thickness"], rules_rect, button_hover)
 	render_button("Reiniciar", cast(f32) configs["line_thickness"], restart_rect, restart_hover)
+
+	if score == '5' {
+		render_last_move(vertices[:])
+		render_victory(.J)
+		return
+	}
+	if dogs_won {
+		render_victory(.D)
+		return
+	}
+
 
 }
 
