@@ -55,13 +55,13 @@ load_assets :: proc() -> Assets {
 	assets: Assets
 
 	// SFX
-    wave := rl.LoadWaveFromMemory(".wav", rawptr(raw_data(move_bytes)), cast(i32) len(move_bytes))
-    assets.sfx_move = rl.LoadSoundFromWave(wave)
-    rl.UnloadWave(wave)
-
-    wave = rl.LoadWaveFromMemory(".wav", rawptr(raw_data(capture_bytes)), cast(i32) len(capture_bytes))
-    assets.sfx_capture = rl.LoadSoundFromWave(wave)
-    rl.UnloadWave(wave)
+	load_sound_from_memory :: proc(sfx: ^rl.Sound, bytes: []u8) {
+	    wave := rl.LoadWaveFromMemory(".wav", rawptr(raw_data(bytes)), cast(i32) len(bytes))
+	    sfx^  = rl.LoadSoundFromWave(wave)
+	    rl.UnloadWave(wave)
+	}
+	load_sound_from_memory(&assets.sfx_move,    move_bytes)
+	load_sound_from_memory(&assets.sfx_capture, capture_bytes)
 
 	// BGM
     assets.bgm = rl.LoadMusicStreamFromMemory(".wav", rawptr(raw_data(bgm_bytes)), cast(i32) len(bgm_bytes))
@@ -100,10 +100,9 @@ read_configs_noblocking :: proc() {
 	    file := strings.trim(string(buf), " \n\t")
 
 	    for line in strings.split_lines(file) {
-
 		    config := strings.trim(line, " \n\t")
 		    if config == "" do continue
-		    pair   := strings.split(config, " ")
+		    pair     := strings.split(config, " ")
 		    number,_ := strconv.parse_int(slice.last(pair))
 		    configs[slice.first(pair)] = cast(u32) number
 	    }
@@ -170,7 +169,7 @@ vert_from_coord :: proc(x, y: int) -> (idx: int) {
 update :: proc (
     pieces:  ^[dynamic; $N]Entity,
     vertices:  ^[dynamic; $O]rl.Vector2,
-    adjacencies_and_captures: ^[31]bit_set[0..<31],
+    adjacencies_and_captures: ^Adjacency,
 	assets: Assets) {
 
     update_scaling()
@@ -238,7 +237,7 @@ update :: proc (
 	    }
     }
 
-    if check_if_dogs_won(adjacencies_and_captures[:]) {
+    if check_if_dogs_won(adjacencies_and_captures^) {
 	    flags += {.Dogs_Won}
 	    return
     }
@@ -348,13 +347,10 @@ update_pieces :: proc(pieces: ^[dynamic; $M] Entity, vertices: []rl.Vector2) {
 		    e := BOARD[x][y]
 		    if e == .n || e == .i do continue
 
-		    pos: rl.Vector2
-		    idx := vert_from_coord(x,y)
-		    pos = vertices[idx]
+		    pos := vertices[vert_from_coord(x,y)]
 		    if e == .D {
 			    pos -= cast(f32) configs["dog_size"]/2
 		    }
-
 		    append(pieces, Entity{e, {x, y}, pos})
 	    }
     }
@@ -385,7 +381,7 @@ index_captured :: proc(src, dst: int) -> int {
     return captured
 }
 
-compute_possible_captures :: proc() -> [31]bit_set[0..<31] {
+compute_possible_captures :: proc() -> Adjacency {
     adjacencies_and_captures := adjacencies
     jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
 
@@ -410,6 +406,7 @@ update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
 
     center := origin
 
+	// Square
     for i in 1 ..< 6 {
 	    for j in 1 ..< 6 {
 		    append(vertices, center)
@@ -418,6 +415,7 @@ update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
 	    center = rl.Vector2{origin.x, origin.y + cast(f32)i * UNIT}
     }
 
+	// Triangle
     center = rl.Vector2{origin.x + 1.5 * UNIT, origin.y + 5 * UNIT}
     for _ in 0 ..< 3 {
 	    append(vertices, center)
@@ -431,7 +429,7 @@ update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
     }
 }
 
-check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
+check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
 
     if .Dogs_Turn in flags {
 	    return false
@@ -451,7 +449,7 @@ check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
     return true
 }
 
-render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: [31]bit_set[0..<31], assets: Assets) {
+render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency, assets: Assets) {
 
     // Background
     rl.ClearBackground(rl.GetColor(configs["bg_color"]))
@@ -859,6 +857,7 @@ import rl "vendor:raylib"
 [ ] Implement images for the rules
 
 @BUGS:
+[ ] horizontal capture on vertex 26
 [ ] after a capture on the triangle the last_move around highlight use a rect instead of a circle
 [ ] changing configs after gameover do not update rendering
 
