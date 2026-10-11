@@ -21,8 +21,8 @@ CONFIG_PATH :: "onca.cfg"
 
 configs := map[string]u32 {
 	"scale"            = 90,
-	"screen_width"     = 800,
-	"screen_height"    = 600,
+	"screen_width"     = 1200,
+	"screen_height"    = 800,
 
 	"border_size"      = 8,
 	"line_thickness"   = 4,
@@ -79,7 +79,7 @@ INITIAL_BOARD := [7][5] Entity_Kind {
 	{.n, .n, .n, .n, .n},
 	{.n, .n, .n, .n, .n},
 	{.i, .n, .n, .n, .i},
-    {.i, .n, .n, .n, .i},
+        {.i, .n, .n, .n, .i},
 }
 
 BOARD := INITIAL_BOARD
@@ -242,25 +242,25 @@ render_victory :: proc (kind: Entity_Kind) {
 	mesg1, mesg2: cstring
 	switch kind {
 	case .J: mesg1 = "A ONCA"
-		     mesg2 = "GANHOU"
+    	         mesg2 = "GANHOU"
 
 	case .D: mesg1 = "OS CÃES"
-		     mesg2 = "GANHARAM"
+                 mesg2 = "GANHARAM"
 
 	case .n, .i: return
 	}
 
 	// Board Square
 	rect := rl.Rectangle {
-		SCREEN_WIDTH/2  - BOARD_WIDTH/2,
+	    SCREEN_WIDTH/2  - BOARD_WIDTH/2,
 	    SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
 	    BOARD_WIDTH,
 	    BOARD_WIDTH,
 	}
 	w := rect.x
 	h := rect.y + UNIT * 4.5
-    rl.DrawTextEx(font, mesg1, rl.Vector2{w, h},      0, 36, rl.LIGHTGRAY);
-    rl.DrawTextEx(font, mesg2, rl.Vector2{w, h + 38}, 0, 36, rl.LIGHTGRAY);
+        rl.DrawTextEx(font, mesg1, rl.Vector2{w, h},      36, 0, rl.LIGHTGRAY);
+        rl.DrawTextEx(font, mesg2, rl.Vector2{w, h + 38}, 36, 0, rl.LIGHTGRAY);
 }
 
 check_if_dogs_won :: proc(adjacencies_and_captures: []bit_set[0..<31]) -> bool {
@@ -295,23 +295,43 @@ update :: proc (
 	border := cast(f32) configs["line_thickness"]
 	width := UNIT * 0.6
 	rules_rect = rl.Rectangle {
-		SCREEN_WIDTH/2  - BOARD_WIDTH/2  + UNIT * 3 + (UNIT - width)/2,
+	    SCREEN_WIDTH/2  - BOARD_WIDTH/2  + UNIT * 3 + (UNIT - width)/2,
 	    SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 + UNIT * 6 - 40 - border,
-		width,
-		40,
+	    width,
+	    40,
 	}
 
 	width = UNIT * 0.65
 	restart_rect = rl.Rectangle {
-		SCREEN_WIDTH/2  - BOARD_WIDTH/2  + (UNIT - width)/2,
+	    SCREEN_WIDTH/2  - BOARD_WIDTH/2  + (UNIT - width)/2,
 	    SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 + UNIT * 6 - 40 - border,
-		width,
-		40,
+	    width,
+	    40,
 	}
 
 	jaguar_size := cast(f32) configs["jaguar_size"]
 	dog_size    := cast(f32) configs["dog_size"]
 	vertex_size := cast(f32) configs["vertex_size"]
+        
+        mouse = rl.GetMousePosition()
+
+	if rl.CheckCollisionPointRec(mouse, rules_rect) {
+		button_hover = true
+		if rl.IsMouseButtonPressed(.LEFT) {
+			should_render_rules = !should_render_rules
+		}
+	} else {
+		button_hover = false
+	}
+
+	if rl.CheckCollisionPointRec(mouse, restart_rect) {
+		restart_hover = true
+		if rl.IsMouseButtonPressed(.LEFT) {
+			should_restart = true
+		}
+	} else {
+		restart_hover = false
+	}
 
 	if should_restart {
 		BOARD                 = INITIAL_BOARD
@@ -345,26 +365,6 @@ update :: proc (
 	if check_if_dogs_won(adjacencies_and_captures[:]) {
 		render_victory(.D)
 		return
-	}
-
-    mouse = rl.GetMousePosition()
-
-	if rl.CheckCollisionPointRec(mouse, rules_rect) {
-		button_hover = true
-		if rl.IsMouseButtonPressed(.LEFT) {
-			should_render_rules = !should_render_rules
-		}
-	} else {
-		button_hover = false
-	}
-
-	if rl.CheckCollisionPointRec(mouse, restart_rect) {
-		restart_hover = true
-		if rl.IsMouseButtonPressed(.LEFT) {
-			should_restart = true
-		}
-	} else {
-		restart_hover = false
 	}
 
     if rl.IsMouseButtonDown(.LEFT) {
@@ -776,7 +776,7 @@ main :: proc() {
     defer rl.CloseAudioDevice()
 
     codepointCount: i32 = 0
-    codepoints := rl.LoadCodepoints(" !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~", &codepointCount)
+    codepoints := rl.LoadCodepoints(" !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZÃ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~", &codepointCount)
     font = rl.LoadFontFromMemory(".ttf", rawptr(raw_data(font_bytes)), cast(i32) len(font_bytes), 64, codepoints, codepointCount)
     rl.UnloadCodepoints(codepoints)
     defer rl.UnloadFont(font)
@@ -824,9 +824,10 @@ main :: proc() {
 [ ] Better Colors
 [ ] Implement images for the rules
 
-
 @BUGS:
 [ ] changing configs after gameover do not update rendering
+[ ] rendering last move over rules
+[ ] rendering victory message over rules
 
 @REFACTOR:
 [ ] collapse data into a game_state struct
