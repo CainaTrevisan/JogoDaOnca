@@ -456,69 +456,45 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
 
     // Board Square
     rect := rl.Rectangle {
-    SCREEN_WIDTH/2  - BOARD_WIDTH/2,
+	    SCREEN_WIDTH/2  - BOARD_WIDTH/2,
         SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
         BOARD_WIDTH,
         BOARD_WIDTH,
     }
-
     rl.DrawRectangleRec(rect, rl.GetColor(configs["fg_color"]))
 
     // Board Triangle
     v1 := rl.Vector2{SCREEN_WIDTH/2, rect.y + UNIT * 4}
     v2 := rl.Vector2{v1.x - UNIT, v1.y + 2*UNIT}
     v3 := rl.Vector2{v1.x + UNIT, v1.y + 2*UNIT}
-
     rl.DrawTriangle(v1, v2, v3, rl.GetColor(configs["fg_color"]))
 
-    // Lines
-    start := rl.Vector2{rect.x, rect.y}
-    end   := start + rl.Vector2{UNIT * 4, 0}
-
-    for i in 0 ..< 4 {
-	    start += rl.Vector2{0, UNIT}
-	    end   += rl.Vector2{0, UNIT}
+	// Lines
+	for i in 1 ..= 3 {
+		start := vertices[vert_from_coord(0, i)]
+		end   := vertices[vert_from_coord(4, i)]
 	    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-    }
-    start = rl.Vector2{rect.x + UNIT * 1.5, rect.y + UNIT * 5}
-    end   = start + rl.Vector2{UNIT, 0}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
 
-    start = rl.Vector2{rect.x + UNIT * 1, rect.y}
-    end   = start + rl.Vector2{0, UNIT * 4}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+		start = vertices[vert_from_coord(i, 0)]
+		end   = vertices[vert_from_coord(i, 4)]
+	    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+	}
 
-    start += rl.Vector2{UNIT * 1, 0}
-    end   += rl.Vector2{UNIT * 1, UNIT * 2}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+	// Diagonal Lines
+	for v in ([?]int{6, 8, 16, 18}) {
+		pos := vertices[v]
+		start := pos - rl.Vector2{UNIT, UNIT}
+		end   := pos + rl.Vector2{UNIT, UNIT}
+	    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
 
-    start += rl.Vector2{UNIT * 1, 0}
-    end   += rl.Vector2{UNIT * 1, -(UNIT * 2)}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+	    start += rl.Vector2{2*UNIT,0}
+	    end   -= rl.Vector2{2*UNIT,0}
+	    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+	}
 
-    start = rl.Vector2{rect.x, rect.y}
-    end   = start + rl.Vector2{UNIT * 4, UNIT * 4}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-    start = rl.Vector2{rect.x + UNIT * 4, rect.y}
-    end   = rl.Vector2{rect.x, rect.y + UNIT * 4}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-    start = rl.Vector2{rect.x + UNIT * 2, rect.y}
-    end   = rl.Vector2{rect.x, rect.y + UNIT * 2}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-    start = rl.Vector2{rect.x + UNIT * 2, rect.y}
-    end   = rl.Vector2{rect.x + UNIT * 4, rect.y + UNIT * 2}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-    start = rl.Vector2{rect.x + UNIT * 2, rect.y + UNIT * 4}
-    end   = rl.Vector2{rect.x, rect.y + UNIT * 2}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-    start = rl.Vector2{rect.x + UNIT * 2, rect.y + UNIT * 4}
-    end   = rl.Vector2{rect.x + UNIT * 4, rect.y + UNIT * 2}
-    rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+	// Triangle Lines
+    rl.DrawLineEx(vertices[22], vertices[29], 4, rl.GetColor(configs["bg_color"]))
+    rl.DrawLineEx(vertices[25], vertices[27], 4, rl.GetColor(configs["bg_color"]))
 
     // Score
     w := rect.x
@@ -857,8 +833,9 @@ import rl "vendor:raylib"
 [ ] Implement images for the rules
 
 @BUGS:
+[ ] game allows for move after win_condition
 [ ] horizontal capture on vertex 26
-[ ] after a capture on the triangle the last_move around highlight use a rect instead of a circle
+[ ] after a capture on the triangle (vertex 22) the last_move around highlight use a rect instead of a circle
 [ ] changing configs after gameover do not update rendering
 
 @REFACTOR:
