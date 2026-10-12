@@ -33,7 +33,7 @@ main :: proc() {
 }
 
 init_game :: proc() {
-    compute_adjacencies()
+    build_topology()
 
     nbio.acquire_thread_event_loop()
 
@@ -108,36 +108,6 @@ read_configs_noblocking :: proc() {
     }
 
     nbio.read_entire_file(CONFIG_PATH, &config_file_buffer, parse_config_file)
-}
-
-compute_adjacencies :: proc() {
-    link :: proc(a, b: int) {
-        adjacencies[a] += {b}
-        adjacencies[b] += {a}
-    }
-
-    // Square
-    for v in 0 ..< 25 {
-        if v < 20    do link(v, v+5)
-        if v % 5 < 4 do link(v, v+1)
-    }
-
-    // Diagonals
-    for v in 0 ..< 20 {
-        if (v/5 + v%5) % 2 != 0 do continue
-        if v % 5 < 4 do link(v, v+6)   // down-right
-        if v % 5 > 0 do link(v, v+4)   // down-left
-    }
-
-    // Triangle
-    for v in 25 ..< 28 {
-        link(v, 22)
-        link(v, v+3)
-    }
-    for v in ([]int{26, 29}) {
-        link(v, v-1)
-        link(v, v+1)
-    }
 }
 
 update :: proc (
@@ -238,7 +208,8 @@ update :: proc (
                         if to in adjacencies[drag_from] {
                             flags += {.Dogs_Turn}
                         } else {                                   // a jump
-                            BOARD[index_captured(drag_from, to)] = .None
+                            over,_ := find_jump(drag_from, to)
+                            BOARD[over] = .None
                             score += 1
                             flags += {.Last_Move_Was_Capture}
                         }
@@ -276,40 +247,14 @@ update_scaling :: proc() {
     BOARD_HEIGHT  = UNIT * 6
 }
 
-index_over_piece :: proc(jag, dog: int) -> int {
-    idx := dog - (jag - dog)
-    if dog == 22 {
-        switch jag {
-        case 16 ..= 18, 25 ..= 27: idx -= 1
-        }
-    } else if dog == 26 && (jag == 22 || jag == 29) {
-        idx -= 1
-    } else if dog == 27 && (jag == 22 || jag == 30) {
-        idx -= 2
-    }
-    return idx
-}
-
-index_captured :: proc(src, dst: int) -> int {
-    captured := min(src, dst) + abs((dst - src) / 2)
-    switch src + dst {
-    case 43, 51, 52:
-        if abs(dst - src) != 2 {
-            captured += 1
-        }
-    }
-    return captured
-}
-
 compute_possible_captures :: proc() -> Adjacency {
     adjacencies_and_captures := adjacencies
 
-    for i in adjacencies[jaguar_idx] {
-        if BOARD[i] != .Dog do continue
-        to := index_over_piece(jaguar_idx, i)
-        // @REFACTOR: Is the `to in adjacencies[i]` needed?
-        if to in adjacencies[i] && BOARD[to] == .None {
-            adjacencies_and_captures[jaguar_idx] += {to}
+    for j in JUMPS {
+        if j.from        == jaguar_idx &&
+           BOARD[j.over] == .Dog       &&
+           BOARD[j.to]   == .None {
+                adjacencies_and_captures[jaguar_idx] += {j.to}
         }
     }
     return adjacencies_and_captures
@@ -537,19 +482,15 @@ render_last_move :: proc(vertices: []rl.Vector2) {
                  last_dog_move
 
     is_jaguar_move := .Dogs_Turn in flags || .Last_Move_Was_Capture in flags
-    was_capture    := is_jaguar_move && !(last_move[1] in adjacencies[last_move[0]])
 
     border := cast(f32) configs["border_size"]
 
     start := vertices[last_move[0]]
     end   := vertices[last_move[1]]
 
-    cap_idx := index_captured(last_move[0], last_move[1])
-    if was_capture && cap_idx == 22 {
-        cap := vertices[cap_idx]
-        rl.DrawLineEx(start, cap, 4,
-        rl.GetColor(configs["last_move_color"]))
-        rl.DrawLineEx(cap, end, 4, rl.GetColor(configs["last_move_color"]))
+    if over, ok := find_jump(last_move[0], last_move[1]); ok {
+        rl.DrawLineEx(start, vertices[over], 4, rl.GetColor(configs["last_move_color"]))
+        rl.DrawLineEx(end,   vertices[over], 4, rl.GetColor(configs["last_move_color"]))
     } else {
         rl.DrawLineEx(start, end, 4, rl.GetColor(configs["last_move_color"]))
     }
@@ -639,6 +580,29 @@ render_victory :: proc (piece: Piece, assets: Assets) {
     rl.DrawTextEx(assets.font, mesg2, rl.Vector2{w, h + 38}, 36, 0, color);
 }
 
+build_topology :: proc() {
+    link :: proc(a, b: int) {
+        adjacencies[a] += {b}
+        adjacencies[b] += {a}
+    }
+    add_jump :: proc(from, over, to: int) {
+        append(&JUMPS, Jump{from, over, to}, Jump{to, over, from})
+    }
+
+    for line in LINES {
+        for i in 0 ..< len(line)-1 do link(line[i], line[i+1])
+        for i in 0 ..< len(line)-2 do add_jump(line[i], line[i+1], line[i+2])
+    }
+    for j in BENT_JUMPS do add_jump(j.from, j.over, j.to)
+}
+
+find_jump :: proc(from, to: int) -> (over: int, ok: bool) {
+    for j in JUMPS {
+        if j.from == from && j.to == to do return j.over, true
+    }
+    return -1, false
+}
+
 // Constants
 CONFIG_PATH :: "onca.cfg"
 
@@ -702,8 +666,21 @@ last_jaguar_move := [2]int{}
 last_dog_move    := [2]int{}
 score: u8 = '0'
 
+Jump :: struct { from, over, to: int }
 
+LINES := [?][]int {
+    // rows
+    {0, 1, 2, 3, 4}, {5, 6, 7, 8, 9}, {10, 11, 12, 13, 14}, {15, 16, 17, 18, 19}, {20, 21, 22, 23, 24},
+    // columns (the middle one runs through the triangle)
+    {0, 5, 10, 15, 20}, {1, 6, 11, 16, 21}, {2, 7, 12, 17, 22, 26, 29}, {3, 8, 13, 18, 23}, {4, 9, 14, 19, 24},
+    // square diagonals
+    {0, 6, 12, 18, 24}, {4, 8, 12, 16, 20}, {2, 6, 10}, {2, 8, 14}, {10, 16, 22}, {14, 18, 22},
+    // triangle edges
+    {22, 25, 28}, {22, 27, 30}, {25, 26, 27}, {28, 29, 30},
+}
 
+BENT_JUMPS :: [?]Jump { {16, 22, 27}, {18, 22, 25} }
+JUMPS: [dynamic; 96]Jump
 
 Adjacency :: [31]bit_set[0..<31]
 adjacencies: Adjacency
