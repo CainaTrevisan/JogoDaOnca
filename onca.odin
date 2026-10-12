@@ -3,7 +3,6 @@ package onca
 
 main :: proc() {
 
-    pieces:    [dynamic; 15] Entity
     vertices:  [dynamic; 32] rl.Vector2
 
     init_game()
@@ -19,7 +18,7 @@ main :: proc() {
         // rl.UpdateMusicStream(assets.bgm)
 
         adjacencies_and_captures: Adjacency
-        update(&pieces, &vertices, &adjacencies_and_captures, assets)
+        update(&vertices, &adjacencies_and_captures, assets)
 
         rl.BeginDrawing()
         defer rl.EndDrawing()
@@ -28,7 +27,7 @@ main :: proc() {
             render_rules(assets)
         } else {
             render_board(vertices[:], adjacencies_and_captures, assets)
-            render_pieces(pieces[:])
+            render_pieces(vertices[:])
         }
     }
 }
@@ -117,10 +116,6 @@ compute_adjacencies :: proc() {
         adjacencies[b] += {a}
     }
 
-    link_coords :: proc(a, b: [2]int) {
-        link(vert_from_coord(a.x, a.y), vert_from_coord(b.x, b.y))
-    }
-
     // Square
     for v in 0 ..< 25 {
         if v < 20    do link(v, v+5)
@@ -128,12 +123,10 @@ compute_adjacencies :: proc() {
     }
 
     // Diagonals
-    for v := 0; v <= 18; v += 2 {
-        j, i := coord_from_vert(v)
-        link_coords({i, j}, {i+1, j+1})
-        if v != 0 && v != 10 {
-            link_coords({i, j}, {i-1, j+1})
-        }
+    for v in 0 ..< 20 {
+        if (v/5 + v%5) % 2 != 0 do continue
+        if v % 5 < 4 do link(v, v+6)   // down-right
+        if v % 5 > 0 do link(v, v+4)   // down-left
     }
 
     // Triangle
@@ -147,27 +140,7 @@ compute_adjacencies :: proc() {
     }
 }
 
-coord_from_vert :: proc(idx: int) -> (x, y: int){
-    idx := clamp(idx, 0, 30)
-    switch {
-    case idx < 25: return idx/5, idx%5
-    case idx < 28: return 6, idx - 24
-    case:          return 5, idx - 27
-    }
-}
-
-vert_from_coord :: proc(x, y: int) -> (idx: int) {
-    x := clamp(x, 0, 6)
-    y := clamp(y, 0, 4)
-    switch x {
-    case 5: return 27  + y   // middle row -> 28..30
-    case 6: return 24  + y   // base row   -> 25..27
-    case:   return x*5 + y
-    }
-}
-
 update :: proc (
-    pieces:  ^[dynamic; $N]Entity,
     vertices:  ^[dynamic; $O]rl.Vector2,
     adjacencies_and_captures: ^Adjacency,
     assets: Assets) {
@@ -213,21 +186,19 @@ update :: proc (
     }
 
     if .Should_Restart in flags {
-            BOARD            = INITIAL_BOARD
-            score            = '0'
-            last_dog_move    = {}
-            last_jaguar_move = {}
-            jaguar_coord     = {2, 2}
-            dragged_piece    = {.n, {-1, -1}, {}}
-            flags            = {}
+        BOARD            = INITIAL_BOARD
+        jaguar_idx       = 12
+        drag_from        = -1
+        last_jaguar_move = {}
+        last_dog_move    = {}
+        flags            = {}
+        score            = '0'
     }
 
     adjacencies_and_captures^ = compute_possible_captures()
 
     if .Last_Move_Was_Capture in flags {
-        jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
-
-        if adjacencies_and_captures[jaguar] - adjacencies[jaguar] == {} {
+        if adjacencies_and_captures[jaguar_idx] - adjacencies[jaguar_idx] == {} {
             flags += {.Dogs_Turn}
             flags -= {.Last_Move_Was_Capture}
         }
@@ -238,90 +209,62 @@ update :: proc (
     }
     game_over := score == '5' || .Dogs_Won in flags
 
-    if rl.IsMouseButtonDown(.LEFT) {
-        for &e, idx in pieces {
+    if drag_from < 0 && rl.IsMouseButtonDown(.LEFT) {
+        for piece, idx in BOARD {
+            hit := false
 
-            if dragged_piece.coord != {-1, -1} do continue
-            is_piece_clicked := false
-            if e.kind == .J {
-                if  rl.CheckCollisionPointCircle(mouse, e.pos, jaguar_size) {
-                    is_piece_clicked = true
-                }
-
-            } else if e.kind == .D {
-                rect := rl.Rectangle{ e.pos.x, e.pos.y, dog_size, dog_size }
-                if  rl.CheckCollisionPointRec(mouse, rect) {
-                    is_piece_clicked = true
-                }
+            switch piece {
+            case .Jaguar: hit = rl.CheckCollisionPointCircle(mouse, vertices[idx], jaguar_size)
+            case .Dog:    hit = rl.CheckCollisionPointRec(mouse, center_rect(vertices[idx], dog_size))
+            case .None:
             }
-
-            if is_piece_clicked {
-                dragged_piece = {e.kind, e.coord, mouse}
-            }
+            if hit { drag_from = idx; break }
         }
     }
 
     if rl.IsMouseButtonUp(.LEFT) {
-        if !game_over && dragged_piece.coord != {-1, -1} {
-            vert := vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
-            possible_moves := adjacencies_and_captures[vert]
-            if .Last_Move_Was_Capture in flags {
-                possible_moves -= adjacencies[vert]
-            }
-            for idx in possible_moves {
-                v := vertices[idx]
-                i, j := coord_from_vert(idx)
-                if BOARD[i][j] != .n do continue
-                got_new_coord := false
-                if dragged_piece.kind == .J && .Dogs_Turn not_in flags {
-                    if rl.CheckCollisionCircles(mouse, jaguar_size, v, vertex_size * 3) {
-                        got_new_coord = true
-                        if idx in (adjacencies_and_captures[vert] - adjacencies[vert]) {
-                            captured := index_captured(vert, idx)
-                            x, y := coord_from_vert(captured)
-                            BOARD[x][y] = .n
+        if !game_over && drag_from >= 0 {
+            piece := BOARD[drag_from]
+            moves := adjacencies_and_captures[drag_from]
+            if .Last_Move_Was_Capture in flags do moves -= adjacencies[drag_from]
+
+            for to in moves {
+                if BOARD[to] != .None do continue
+                moved := false
+                switch {
+                case piece == .Jaguar && .Dogs_Turn not_in flags:
+                    if rl.CheckCollisionCircles(mouse, jaguar_size, vertices[to], vertex_size*3) {
+                        moved = true
+                        if to in adjacencies[drag_from] {
+                            flags += {.Dogs_Turn}
+                        } else {                                   // a jump
+                            BOARD[index_captured(drag_from, to)] = .None
                             score += 1
                             flags += {.Last_Move_Was_Capture}
                         }
-                        last_jaguar_move[0] = vert
-                        last_jaguar_move[1] = idx
-                        if idx in adjacencies[vert] {
-                            flags += {.Dogs_Turn}
-                        }
+                        last_jaguar_move = {drag_from, to}
                     }
-                }
-                if dragged_piece.kind == .D  && .Dogs_Turn in flags {
-                    x := mouse.x - dog_size / 2
-                    y := mouse.y - dog_size / 2
-                    rect := rl.Rectangle{ x, y, dog_size, dog_size }
-                    if rl.CheckCollisionCircleRec(v, vertex_size * 3, rect) {
-                        got_new_coord = true
+                case piece == .Dog && .Dogs_Turn in flags:
+                    if rl.CheckCollisionCircleRec(vertices[to], vertex_size*3, center_rect(mouse, dog_size)) {
+                        moved = true
                         flags -= {.Dogs_Turn}
-                        last_dog_move[0] = vert
-                        last_dog_move[1] = idx
+                        last_dog_move = {drag_from, to}
                     }
                 }
-
-                x, y := coord_from_vert(idx)
-                if got_new_coord && BOARD[x][y] == .n &&
-                   dragged_piece.coord != ([2]int{x,y}) {
-
-                    BOARD[x][y] = dragged_piece.kind
-                    if BOARD[x][y] == .J do jaguar_coord = {x,y}
-                    sfx := assets.sfx_capture if .Last_Move_Was_Capture in flags else assets.sfx_move
-                    rl.PlaySound(sfx)
-
-                    x, y = dragged_piece.coord.x, dragged_piece.coord.y
-                    BOARD[x][y] = .n
-
+                if moved {
+                    BOARD[drag_from], BOARD[to] = .None, piece
+                    if piece == .Jaguar do jaguar_idx = to
+                    rl.PlaySound(assets.sfx_capture if .Last_Move_Was_Capture in flags else assets.sfx_move)
                     break
                 }
             }
         }
-        dragged_piece = {.n, {-1, -1}, {}}
+        drag_from = -1
     }
+}
 
-    update_pieces(pieces, vertices[:])
+center_rect :: proc(pos: rl.Vector2, size: f32) -> rl.Rectangle {
+    return {pos.x - size/2, pos.y - size/2, size, size}
 }
 
 update_scaling :: proc() {
@@ -331,25 +274,6 @@ update_scaling :: proc() {
     UNIT          = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
     BOARD_WIDTH   = UNIT * 4
     BOARD_HEIGHT  = UNIT * 6
-}
-
-update_pieces :: proc(pieces: ^[dynamic; $M] Entity, vertices: []rl.Vector2) {
-
-    clear(pieces)
-
-    for kinds, x in BOARD {
-        for _, y in kinds {
-
-            e := BOARD[x][y]
-            if e == .n || e == .i do continue
-
-            pos := vertices[vert_from_coord(x,y)]
-            if e == .D {
-                pos -= cast(f32) configs["dog_size"]/2
-            }
-            append(pieces, Entity{e, {x, y}, pos})
-        }
-    }
 }
 
 index_over_piece :: proc(jag, dog: int) -> int {
@@ -379,16 +303,13 @@ index_captured :: proc(src, dst: int) -> int {
 
 compute_possible_captures :: proc() -> Adjacency {
     adjacencies_and_captures := adjacencies
-    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
 
-    for i in adjacencies[jaguar] {
-        x, y := coord_from_vert(i)
-        if BOARD[x][y] == .D {
-            new_move := index_over_piece(jaguar, i)
-            x, y = coord_from_vert(new_move)
-            if new_move in adjacencies[i] && BOARD[x][y] == .n {
-                adjacencies_and_captures[jaguar] += {index_over_piece(jaguar, i)}
-            }
+    for i in adjacencies[jaguar_idx] {
+        if BOARD[i] != .Dog do continue
+        to := index_over_piece(jaguar_idx, i)
+        // @REFACTOR: Is the `to in adjacencies[i]` needed?
+        if to in adjacencies[i] && BOARD[to] == .None {
+            adjacencies_and_captures[jaguar_idx] += {to}
         }
     }
     return adjacencies_and_captures
@@ -427,21 +348,11 @@ update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
 
 check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
 
-    if .Dogs_Turn in flags {
-        return false
+    if .Dogs_Turn in flags do return false
+
+    for vert in adjacencies_and_captures[jaguar_idx] {
+        if BOARD[vert] == .None do return false
     }
-
-    jaguar := vert_from_coord(jaguar_coord.x, jaguar_coord.y)
-
-    if .Dogs_Turn not_in flags {
-        for vert in adjacencies_and_captures[jaguar] {
-            x, y := coord_from_vert(vert)
-            if BOARD[x][y] == .n {
-                return false
-            }
-        }
-    }
-
     return true
 }
 
@@ -467,13 +378,8 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
 
     // Lines
     for i in 1 ..= 3 {
-        start := vertices[vert_from_coord(0, i)]
-        end   := vertices[vert_from_coord(4, i)]
-        rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
-
-        start = vertices[vert_from_coord(i, 0)]
-        end   = vertices[vert_from_coord(i, 4)]
-        rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+        rl.DrawLineEx(vertices[i],   vertices[20+i],  4, rl.GetColor(configs["bg_color"]))
+        rl.DrawLineEx(vertices[5*i], vertices[5*i+4], 4, rl.GetColor(configs["bg_color"]))
     }
 
     // Diagonal Lines
@@ -501,11 +407,9 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
     // Render Last Move
     render_last_move(vertices[:])
 
-    highlight_from := -1
-    if dragged_piece.coord != {-1, -1} {
-        highlight_from = vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
-    } else if .Last_Move_Was_Capture in flags && score != '5' {
-        highlight_from = vert_from_coord(jaguar_coord.x, jaguar_coord.y)
+    highlight_from := drag_from
+    if .Last_Move_Was_Capture in flags && score != '5' {
+        highlight_from = jaguar_idx
     }
 
     for v, idx in vertices {
@@ -538,11 +442,11 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
     render_button("Reiniciar", cast(f32) configs["line_size"], restart_rect, .Restart_Hover in flags, assets)
 
     if score == '5' {
-        render_victory(.J, assets)
+        render_victory(.Jaguar, assets)
         return
     }
     if .Dogs_Won in flags {
-        render_victory(.D, assets)
+        render_victory(.Dog, assets)
         return
     }
 }
@@ -574,30 +478,31 @@ render_highlight_around_circle :: proc (center: rl.Vector2, size: f32, thickness
     rl.DrawRing(center, size, size + thickness, 0, 360, 0, color)
 }
 
-render_pieces :: proc(pieces: []Entity) {
+render_pieces :: proc(vertices: []rl.Vector2) {
     jaguar_size := cast(f32) configs["jaguar_size"]
     dog_size    := cast(f32) configs["dog_size"]
 
     LERP :: 0.8
 
-    for e in pieces {
-        if e.kind == .D {
-            rect := rl.Rectangle{ e.pos.x, e.pos.y, dog_size, dog_size }
+    for piece, idx in BOARD {
+        if piece == .None do continue
+        if piece == .Dog {
+            rect  := center_rect(vertices[idx], dog_size)
             color := rl.GetColor(configs["dog_color"])
-            if dragged_piece.coord == e.coord {
+            if idx == drag_from {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
             rl.DrawRectangleRec(rect, color)
             render_highlight_around_rect(rect, cast(f32) configs["line_size"], rl.Color{0,0,0,255})
 
-        } else if e.kind == .J {
+        } else if piece == .Jaguar {
             color := rl.GetColor(configs["jaguar_color"])
-            if dragged_piece.coord == e.coord {
+            if idx == drag_from {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
-            rl.DrawCircleV(e.pos, jaguar_size, color)
+            rl.DrawCircleV(vertices[idx], jaguar_size, color)
             render_highlight_around_circle(
-                e.pos,
+                vertices[idx],
                 jaguar_size,
                 cast(f32) configs["line_size"],
                 rl.Color{0,0,0,255}
@@ -605,14 +510,14 @@ render_pieces :: proc(pieces: []Entity) {
         }
     }
 
-    if dragged_piece.kind == .D {
-        x := mouse.x - dog_size / 2
-        y := mouse.y - dog_size / 2
-        rect := rl.Rectangle{ x, y, dog_size, dog_size }
+    if drag_from < 0 do return
+
+    if BOARD[drag_from] == .Dog {
+        rect := center_rect(mouse, dog_size)
         rl.DrawRectangleRec(rect, rl.GetColor(configs["dog_color"]))
         render_highlight_around_rect(rect, cast(f32) configs["border_size"], rl.GetColor(configs["highlight_color"]))
 
-    } else if dragged_piece.kind == .J {
+    } else if BOARD[drag_from] == .Jaguar {
         rl.DrawCircleV(mouse, jaguar_size, rl.GetColor(configs["jaguar_color"]))
         render_highlight_around_circle(
             mouse,
@@ -702,18 +607,23 @@ render_rules :: proc(assets: Assets) {
 }
 
 
-render_victory :: proc (kind: Entity_Kind, assets: Assets) {
+render_victory :: proc (piece: Piece, assets: Assets) {
     mesg1, mesg2: cstring
     color: rl.Color
-    switch kind {
-    case .J: mesg1 = "A ONCA"
-             mesg2 = "GANHOU"
-     color = rl.GetColor(configs["jaguar_color"])
-    case .D: mesg1 = "OS CÃES"
-             mesg2 = "GANHARAM"
-     color = rl.GetColor(configs["dog_color"])
 
-    case .n, .i: return
+    switch piece {
+
+    case .Jaguar:
+        mesg1 = "A ONCA"
+        mesg2 = "GANHOU"
+        color = rl.GetColor(configs["jaguar_color"])
+
+    case .Dog:
+        mesg1 = "OS CÃES"
+        mesg2 = "GANHARAM"
+        color = rl.GetColor(configs["dog_color"])
+
+    case .None: return
     }
 
     // Board Square
@@ -775,31 +685,25 @@ State_Flags :: enum {
 }
 flags: bit_set[State_Flags]
 
-Entity_Kind :: enum {n, i, D, J}
-dragged_piece: Entity = {.n, {-1, -1}, {0, 0}}
-score: u8 = '0'
+NUM_VERTS :: 31
 
-jaguar_coord     := [2]int{2, 2}
+Piece :: enum u8 {None, Dog, Jaguar}
+
+INITIAL_BOARD :: [NUM_VERTS]Piece {
+    00 ..< 12        = .Dog,
+    12               = .Jaguar,
+    13 ..< 15        = .Dog,
+    15 ..< NUM_VERTS = .None,
+}
+BOARD := INITIAL_BOARD
+jaguar_idx := 12
+drag_from  := -1
 last_jaguar_move := [2]int{}
 last_dog_move    := [2]int{}
+score: u8 = '0'
 
-INITIAL_BOARD := [7][5] Entity_Kind {
-    {.D, .D, .D, .D, .D},
-    {.D, .D, .D, .D, .D},
-    {.D, .D, .J, .D, .D},
-    {.n, .n, .n, .n, .n},
-    {.n, .n, .n, .n, .n},
-    {.i, .n, .n, .n, .i},
-    {.i, .n, .n, .n, .i},
-}
 
-BOARD := INITIAL_BOARD
 
-Entity :: struct {
-    kind:  Entity_Kind,
-    coord: [2]int,
-    pos:   rl.Vector2,
-}
 
 Adjacency :: [31]bit_set[0..<31]
 adjacencies: Adjacency
@@ -832,6 +736,7 @@ import rl "vendor:raylib"
 [ ] Implement images for the rules
 
 @BUGS:
+[] after restart dragging pieces does not work
 
 @REFACTOR:
 [ ] collapse data into game_state, input and render structs
