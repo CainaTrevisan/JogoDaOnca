@@ -239,8 +239,8 @@ update :: proc (
 
     if check_if_dogs_won(adjacencies_and_captures^) {
 	    flags += {.Dogs_Won}
-	    return
     }
+	game_over := score == '5' || .Dogs_Won in flags
 
     if rl.IsMouseButtonDown(.LEFT) {
         for &e, idx in pieces {
@@ -266,7 +266,7 @@ update :: proc (
     }
 
     if rl.IsMouseButtonUp(.LEFT) {
-        if dragged_piece.coord != {-1, -1} {
+        if !game_over && dragged_piece.coord != {-1, -1} {
 	        vert := vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
 	        possible_moves := adjacencies_and_captures[vert]
 	        if .Last_Move_Was_Capture in flags {
@@ -322,7 +322,7 @@ update :: proc (
 			    }
 		    }
 	    }
-	    dragged_piece = {.n, {-1, -1}, {0,0}}
+	    dragged_piece = {.n, {-1, -1}, {}}
     }
 
     update_pieces(pieces, vertices[:])
@@ -374,7 +374,7 @@ index_captured :: proc(src, dst: int) -> int {
     captured := min(src, dst) + abs((dst - src) / 2)
     switch src + dst {
     case 43, 51, 52:
-	    if src != 25 || dst != 25 {
+	    if (bit_set[25..=27]{src, dst}) - {25, 27} != {} {
 		    captured += 1
 	    }
     }
@@ -505,6 +505,13 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
     // Render Last Move
     render_last_move(vertices[:])
 
+	highlight_from := -1
+	if dragged_piece.coord != {-1, -1} {
+	    highlight_from = vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
+	} else if .Last_Move_Was_Capture in flags && score != '5' {
+	    highlight_from = vert_from_coord(jaguar_coord.x, jaguar_coord.y)
+	}
+
     for v, idx in vertices {
 	    color := rl.WHITE
 	    last_move := last_jaguar_move if .Dogs_Turn in flags || .Last_Move_Was_Capture in flags else
@@ -513,16 +520,25 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
 	    if idx == last_move[0] {
 		    color = rl.GetColor(configs["last_move_color"])
 	    }
-	    if dragged_piece.coord != {-1, -1} {
-		    dragged_idx := vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
-		    possible_moves := adjacencies_and_captures[dragged_idx]
+		if highlight_from >= 0 {
+		    possible_moves := adjacencies_and_captures[highlight_from]
 		    if .Last_Move_Was_Capture in flags {
-			    possible_moves -= adjacencies[dragged_idx]
+		        possible_moves -= adjacencies[highlight_from]
 		    }
 		    if idx in possible_moves {
-			    color = rl.GetColor(configs["highlight_color"])
+		        color = rl.GetColor(configs["highlight_color"])
 		    }
-	    }
+		}
+	    // if dragged_piece.coord != {-1, -1} || .Last_Move_Was_Capture in flags {
+		   //  dragged_idx := vert_from_coord(dragged_piece.coord.x, dragged_piece.coord.y)
+		   //  possible_moves := adjacencies_and_captures[dragged_idx]
+		   //  if .Last_Move_Was_Capture in flags {
+			  //   possible_moves -= adjacencies[dragged_idx]
+		   //  }
+		   //  if idx in possible_moves {
+			  //   color = rl.GetColor(configs["highlight_color"])
+		   //  }
+	    // }
 	    rl.DrawCircleV(v, cast(f32) configs["vertex_size"], color)
 	    render_highlight_around_circle(
 	        v,
@@ -536,7 +552,6 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
     render_button("Reiniciar", cast(f32) configs["line_size"], restart_rect, .Restart_Hover in flags, assets)
 
     if score == '5' {
-	    render_last_move(vertices[:])
 	    render_victory(.J, assets)
 	    return
     }
@@ -649,18 +664,16 @@ render_last_move :: proc(vertices: []rl.Vector2) {
     }
 
     rl.DrawCircleV(start, vertex_size, rl.GetColor(configs["last_move_color"]))
-    if .Dogs_Turn in flags && .Last_Move_Was_Capture not_in flags {
+    if is_jaguar_move {
 	    rl.DrawRing(end, jaguar_size, jaguar_size + border * 1.2,
 	    0, 360, 0, rl.GetColor(configs["last_move_color"]))
-    } else {
-	    if last_dog_move != {0, 0} {
-		    rect := rl.Rectangle {
-			    end.x - dog_size/2 - border,
-			    end.y - dog_size/2 - border,
-			    dog_size + border* 2, dog_size + border* 2,
-		    }
-		    rl.DrawRectangleLinesEx(rect, border * 1.3, rl.GetColor(configs["last_move_color"]))
+    } else  if last_dog_move != {0, 0} {
+	    rect := rl.Rectangle {
+		    end.x - dog_size/2 - border,
+		    end.y - dog_size/2 - border,
+		    dog_size + border* 2, dog_size + border* 2,
 	    }
+	    rl.DrawRectangleLinesEx(rect, border * 1.3, rl.GetColor(configs["last_move_color"]))
     }
 }
 
@@ -781,8 +794,8 @@ dragged_piece: Entity = {.n, {-1, -1}, {0, 0}}
 score: u8 = '0'
 
 jaguar_coord     := [2]int{2, 2}
-last_jaguar_move := [2]int{0, 12}
-last_dog_move    := [2]int{0,  0}
+last_jaguar_move := [2]int{}
+last_dog_move    := [2]int{}
 
 INITIAL_BOARD := [7][5] Entity_Kind {
     {.D, .D, .D, .D, .D},
@@ -833,10 +846,6 @@ import rl "vendor:raylib"
 [ ] Implement images for the rules
 
 @BUGS:
-[ ] game allows for move after win_condition
-[ ] horizontal capture on vertex 26
-[ ] after a capture on the triangle (vertex 22) the last_move around highlight use a rect instead of a circle
-[ ] changing configs after gameover do not update rendering
 
 @REFACTOR:
 [ ] collapse data into game_state, input and render structs
