@@ -15,7 +15,7 @@ main :: proc() {
 
     for !rl.WindowShouldClose() {
         read_configs_noblocking()
-        // rl.UpdateMusicStream(assets.bgm)
+        //rl.UpdateMusicStream(assets.bgm)
 
         adjacencies_and_captures: Adjacency
         update(&vertices, &adjacencies_and_captures, assets)
