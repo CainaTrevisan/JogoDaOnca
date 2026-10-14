@@ -102,8 +102,43 @@ read_configs_noblocking :: proc() {
             config := strings.trim(line, " \n\t")
             if config == "" do continue
             pair     := strings.split(config, " ")
-            number,_ := strconv.parse_int(slice.last(pair))
-            configs[slice.first(pair)] = cast(u32) number
+            key := slice.first(pair)
+            keys :: []string {
+                "scale",
+                "screen_width",
+                "screen_height",
+                "border_size",
+                "line_size",
+                "vertex_size",
+                "dog_size",
+                "jaguar_size",
+                "bg_color",
+                "fg_color",
+                "button_bg_color",
+                "button_fg_color",
+                "dog_color",
+                "jaguar_color",
+                "highlight_color",
+                "last_move_color",
+            }
+            valid := false
+            color := true if strings.contains(key, "color") else false
+            for k in keys {
+                if k == key {
+                    valid = true
+                }
+            }
+            if !valid {
+                log.errorf("config invalid: %v", key)
+                return
+            }
+            if color {
+                number,_ := strconv.parse_int(slice.last(pair))
+                configs[key] = cast(u32) number
+            } else {
+                number,_ := strconv.parse_f32(slice.last(pair))
+                configs[key] = number
+            }
         }
     }
 
@@ -118,22 +153,26 @@ update :: proc (
     update_scaling()
     update_vertices(vertices)
 
-    border := cast(f32) configs["line_size"]
-    width := UNIT * 0.6
+    border := configs["line_size"].(f32)
+    width  := UNIT * 0.6
+    height := UNIT * 0.4
     rules_rect = rl.Rectangle {
-        SCREEN_WIDTH/2  - BOARD_WIDTH/2  + UNIT * 3 + (UNIT - width)/2,
-        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 + UNIT * 6 - 40 - border,
+        SCREEN_WIDTH/2  - BOARD_WIDTH/2  + UNIT * 3 + (UNIT - width)  * 0.5,
+        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 + UNIT * 6 - (UNIT - height) * 0.71,
         width,
-        40,
+        height,
     }
 
     width = UNIT * 0.65
     restart_rect = rules_rect
     restart_rect.x =  SCREEN_WIDTH/2 - BOARD_WIDTH/2 + (UNIT - width)/2
 
-    jaguar_size := cast(f32) configs["jaguar_size"]
-    dog_size    := cast(f32) configs["dog_size"]
-    vertex_size := cast(f32) configs["vertex_size"]
+    jaguar_size,_ := configs["jaguar_size"].(f32)
+    dog_size,_    := configs["dog_size"].(f32)
+    vertex_size,_ := configs["vertex_size"].(f32)
+    vertex_size *= UNIT
+    jaguar_size *= UNIT
+    dog_size *= UNIT
 
     mouse = rl.GetMousePosition()
 
@@ -241,7 +280,8 @@ center_rect :: proc(pos: rl.Vector2, size: f32) -> rl.Rectangle {
 update_scaling :: proc() {
     SCREEN_WIDTH  = cast(f32) rl.GetScreenWidth()
     SCREEN_HEIGHT = cast(f32) rl.GetScreenHeight()
-    SCALE         = cast(f32) configs["scale"] / 100
+    scale, ok     := configs["scale"].(f32)
+    SCALE         = scale * 0.01
     UNIT          = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
     BOARD_WIDTH   = UNIT * 4
     BOARD_HEIGHT  = UNIT * 6
@@ -302,9 +342,17 @@ check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
 }
 
 render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency, assets: Assets) {
+    vertex_size,_     := configs["vertex_size"].(f32)
+    line_size,_       := configs["line_size"].(f32)
+    bg_color,_        := configs["bg_color"].(u32)
+    fg_color,_        := configs["fg_color"].(u32)
+    last_move_color,_ := configs["last_move_color"].(u32)
+    highlight_color,_ := configs["highlight_color"].(u32)
+    vertex_size *= UNIT
+    // line_size *= UNIT
 
     // Background
-    rl.ClearBackground(rl.GetColor(configs["bg_color"]))
+    rl.ClearBackground(rl.GetColor(bg_color))
 
     // Board Square
     rect := rl.Rectangle {
@@ -313,18 +361,18 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
         BOARD_WIDTH,
         BOARD_WIDTH,
     }
-    rl.DrawRectangleRec(rect, rl.GetColor(configs["fg_color"]))
+    rl.DrawRectangleRec(rect, rl.GetColor(configs["fg_color"].(u32)))
 
     // Board Triangle
     v1 := rl.Vector2{SCREEN_WIDTH/2, rect.y + UNIT * 4}
     v2 := rl.Vector2{v1.x - UNIT, v1.y + 2*UNIT}
     v3 := rl.Vector2{v1.x + UNIT, v1.y + 2*UNIT}
-    rl.DrawTriangle(v1, v2, v3, rl.GetColor(configs["fg_color"]))
+    rl.DrawTriangle(v1, v2, v3, rl.GetColor(fg_color))
 
     // Lines
     for i in 1 ..= 3 {
-        rl.DrawLineEx(vertices[i],   vertices[20+i],  4, rl.GetColor(configs["bg_color"]))
-        rl.DrawLineEx(vertices[5*i], vertices[5*i+4], 4, rl.GetColor(configs["bg_color"]))
+        rl.DrawLineEx(vertices[i],   vertices[20+i],  4, rl.GetColor(bg_color))
+        rl.DrawLineEx(vertices[5*i], vertices[5*i+4], 4, rl.GetColor(bg_color))
     }
 
     // Diagonal Lines
@@ -332,22 +380,23 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
         pos := vertices[v]
         start := pos - rl.Vector2{UNIT, UNIT}
         end   := pos + rl.Vector2{UNIT, UNIT}
-        rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+        rl.DrawLineEx(start, end, 4, rl.GetColor(bg_color))
 
         start += rl.Vector2{2*UNIT,0}
         end   -= rl.Vector2{2*UNIT,0}
-        rl.DrawLineEx(start, end, 4, rl.GetColor(configs["bg_color"]))
+        rl.DrawLineEx(start, end, 4, rl.GetColor(bg_color))
     }
 
     // Triangle Lines
-    rl.DrawLineEx(vertices[22], vertices[29], 4, rl.GetColor(configs["bg_color"]))
-    rl.DrawLineEx(vertices[25], vertices[27], 4, rl.GetColor(configs["bg_color"]))
+    rl.DrawLineEx(vertices[22], vertices[29], 4, rl.GetColor(bg_color))
+    rl.DrawLineEx(vertices[25], vertices[27], 4, rl.GetColor(bg_color))
 
     // Score
     w := rect.x
     h := rect.y + 4.2 * UNIT
+    font_size := UNIT * 0.45
     score_text := cstring(raw_data([]u8{score, 0}))
-    rl.DrawTextEx(assets.font, score_text, rl.Vector2{w, h}, 50, 0, rl.LIGHTGRAY);
+    rl.DrawTextEx(assets.font, score_text, rl.Vector2{w, h}, font_size, 0, rl.LIGHTGRAY);
 
     // Render Last Move
     render_last_move(vertices[:])
@@ -357,13 +406,14 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
         highlight_from = jaguar_idx
     }
 
+    // Render vertices
     for v, idx in vertices {
         color := rl.WHITE
         last_move := last_jaguar_move if .Dogs_Turn in flags || .Last_Move_Was_Capture in flags else
                      last_dog_move
 
         if idx == last_move[0] {
-            color = rl.GetColor(configs["last_move_color"])
+            color = rl.GetColor(last_move_color)
         }
         if highlight_from >= 0 {
             possible_moves := adjacencies_and_captures[highlight_from]
@@ -371,20 +421,21 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
                 possible_moves -= adjacencies[highlight_from]
             }
             if idx in possible_moves {
-                color = rl.GetColor(configs["highlight_color"])
+                color = rl.GetColor(highlight_color)
             }
         }
-        rl.DrawCircleV(v, cast(f32) configs["vertex_size"], color)
+
+        rl.DrawCircleV(v, vertex_size, color)
         render_highlight_around_circle(
             v,
-            cast(f32) configs["vertex_size"],
-            cast(f32) configs["line_size"],
-            rl.GetColor(configs["bg_color"])
+            vertex_size,
+            line_size,
+            rl.GetColor(bg_color)
         )
     }
 
-    render_button("Regras",    cast(f32) configs["line_size"], rules_rect,   .Button_Hover  in flags, assets)
-    render_button("Reiniciar", cast(f32) configs["line_size"], restart_rect, .Restart_Hover in flags, assets)
+    render_button("Regras",    line_size, rules_rect,   .Button_Hover  in flags, assets)
+    render_button("Reiniciar", line_size, restart_rect, .Restart_Hover in flags, assets)
 
     if score == '5' {
         render_victory(.Jaguar, assets)
@@ -397,13 +448,13 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
 }
 
 render_button :: proc(label: cstring, thickness: f32, rect: rl.Rectangle, hover: bool, assets: Assets) {
-    color1 := rl.GetColor(configs["button_fg_color"])
-    color2 := rl.GetColor(configs["button_bg_color"])
+    color1 := rl.GetColor(configs["button_fg_color"].(u32))
+    color2 := rl.GetColor(configs["button_bg_color"].(u32))
     if hover do color1, color2 = color2, color1
     rl.DrawRectangleRec(rect, color1)
-    render_highlight_around_rect(rect, thickness, rl.GetColor(configs["fg_color"]))
+    render_highlight_around_rect(rect, thickness, rl.GetColor(configs["fg_color"].(u32)))
 
-    font_size: f32 = UNIT * 0.2
+    font_size: f32 = UNIT * 0.19
     text_size := rl.MeasureTextEx(assets.font, label, font_size, 0)
     w := rect.x + rect.width  * 0.5 - text_size.x * 0.5
     h := rect.y + rect.height * 0.5 - font_size   * 0.5
@@ -424,8 +475,14 @@ render_highlight_around_circle :: proc (center: rl.Vector2, size: f32, thickness
 }
 
 render_pieces :: proc(vertices: []rl.Vector2) {
-    jaguar_size := cast(f32) configs["jaguar_size"]
-    dog_size    := cast(f32) configs["dog_size"]
+    jaguar_size,_     := configs["jaguar_size"].(f32)
+    dog_size,_        := configs["dog_size"].(f32)
+    line_size,_       := configs["line_size"].(f32)
+    jaguar_color,_    := configs["jaguar_color"].(u32)
+    dog_color,_       := configs["dog_color"].(u32)
+    highlight_color,_ := configs["highlight_color"].(u32)
+    jaguar_size *= UNIT
+    dog_size *= UNIT
 
     LERP :: 0.8
 
@@ -433,15 +490,15 @@ render_pieces :: proc(vertices: []rl.Vector2) {
         if piece == .None do continue
         if piece == .Dog {
             rect  := center_rect(vertices[idx], dog_size)
-            color := rl.GetColor(configs["dog_color"])
+            color := rl.GetColor(dog_color)
             if idx == drag_from {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
             rl.DrawRectangleRec(rect, color)
-            render_highlight_around_rect(rect, cast(f32) configs["line_size"], rl.Color{0,0,0,255})
+            render_highlight_around_rect(rect, line_size, rl.Color{0,0,0,255})
 
         } else if piece == .Jaguar {
-            color := rl.GetColor(configs["jaguar_color"])
+            color := rl.GetColor(jaguar_color)
             if idx == drag_from {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
@@ -449,7 +506,7 @@ render_pieces :: proc(vertices: []rl.Vector2) {
             render_highlight_around_circle(
                 vertices[idx],
                 jaguar_size,
-                cast(f32) configs["line_size"],
+                line_size,
                 rl.Color{0,0,0,255}
             )
         }
@@ -459,58 +516,62 @@ render_pieces :: proc(vertices: []rl.Vector2) {
 
     if BOARD[drag_from] == .Dog {
         rect := center_rect(mouse, dog_size)
-        rl.DrawRectangleRec(rect, rl.GetColor(configs["dog_color"]))
-        render_highlight_around_rect(rect, cast(f32) configs["border_size"], rl.GetColor(configs["highlight_color"]))
+        rl.DrawRectangleRec(rect, rl.GetColor(dog_color))
+        render_highlight_around_rect(rect, line_size, rl.GetColor(highlight_color))
 
     } else if BOARD[drag_from] == .Jaguar {
-        rl.DrawCircleV(mouse, jaguar_size, rl.GetColor(configs["jaguar_color"]))
+        rl.DrawCircleV(mouse, jaguar_size, rl.GetColor(jaguar_color))
         render_highlight_around_circle(
             mouse,
-            cast(f32) configs["jaguar_size"],
-            cast(f32) configs["border_size"],
-            rl.GetColor(configs["highlight_color"])
+            jaguar_size,
+            line_size,
+            rl.GetColor(highlight_color)
         )
     }
 }
 
 render_last_move :: proc(vertices: []rl.Vector2) {
-    jaguar_size := cast(f32) configs["jaguar_size"]
-    dog_size    := cast(f32) configs["dog_size"]
-    vertex_size := cast(f32) configs["vertex_size"]
+    jaguar_size,_ := configs["jaguar_size"].(f32)
+    dog_size,_    := configs["dog_size"].(f32)
+    vertex_size,_ := configs["vertex_size"].(f32)
+    vertex_size   *= UNIT
+    jaguar_size    *= UNIT
+    dog_size      *= UNIT
 
     last_move := last_jaguar_move if .Dogs_Turn in flags || .Last_Move_Was_Capture in flags else
                  last_dog_move
 
     is_jaguar_move := .Dogs_Turn in flags || .Last_Move_Was_Capture in flags
 
-    border := cast(f32) configs["border_size"]
+    border,_ := configs["border_size"].(f32)
 
     start := vertices[last_move[0]]
     end   := vertices[last_move[1]]
 
+    color,_ := configs["last_move_color"].(u32)
     if over, ok := find_jump(last_move[0], last_move[1]); ok {
-        rl.DrawLineEx(start, vertices[over], 4, rl.GetColor(configs["last_move_color"]))
-        rl.DrawLineEx(end,   vertices[over], 4, rl.GetColor(configs["last_move_color"]))
+        rl.DrawLineEx(start, vertices[over], 4, rl.GetColor(color))
+        rl.DrawLineEx(end,   vertices[over], 4, rl.GetColor(color))
     } else {
-        rl.DrawLineEx(start, end, 4, rl.GetColor(configs["last_move_color"]))
+        rl.DrawLineEx(start, end, 4, rl.GetColor(color))
     }
 
-    rl.DrawCircleV(start, vertex_size, rl.GetColor(configs["last_move_color"]))
+    rl.DrawCircleV(start, vertex_size, rl.GetColor(color))
     if is_jaguar_move {
         rl.DrawRing(end, jaguar_size, jaguar_size + border * 1.2,
-        0, 360, 0, rl.GetColor(configs["last_move_color"]))
+        0, 360, 0, rl.GetColor(color))
     } else if last_dog_move != {0, 0} {
         rect := rl.Rectangle {
             end.x - dog_size/2 - border,
             end.y - dog_size/2 - border,
             dog_size + border* 2, dog_size + border* 2,
         }
-        rl.DrawRectangleLinesEx(rect, border * 1.3, rl.GetColor(configs["last_move_color"]))
+        rl.DrawRectangleLinesEx(rect, border * 1.3, rl.GetColor(color))
     }
 }
 
 render_rules :: proc(assets: Assets) {
-    rl.ClearBackground(rl.GetColor(configs["bg_color"]))
+    rl.ClearBackground(rl.GetColor(configs["bg_color"].(u32)))
 
     rules_text := []cstring {
     "2 jogadores jogam em turnos: um com",
@@ -544,7 +605,7 @@ render_rules :: proc(assets: Assets) {
         rl.DrawTextEx(assets.font, line, rl.Vector2{w, h}, font_size, 1, rl.RAYWHITE)
     }
 
-    render_button("Voltar", cast(f32) configs["line_size"], rules_rect, .Button_Hover in flags, assets)
+    render_button("Voltar", configs["line_size"].(f32), rules_rect, .Button_Hover in flags, assets)
 }
 
 
@@ -556,11 +617,11 @@ render_victory :: proc (piece: Piece, assets: Assets) {
 
     case .Jaguar:
         mesg1, mesg2 = "A ONCA", "GANHOU"
-        color = rl.GetColor(configs["jaguar_color"])
+        color = rl.GetColor(configs["jaguar_color"].(u32))
 
     case .Dog:
         mesg1, mesg2 = "OS CÃES", "GANHARAM"
-        color = rl.GetColor(configs["dog_color"])
+        color = rl.GetColor(configs["dog_color"].(u32))
 
     case .None: return
     }
@@ -604,30 +665,30 @@ find_jump :: proc(from, to: int) -> (over: int, ok: bool) {
 // Constants
 CONFIG_PATH :: "onca.cfg"
 
-configs := map[string]u32 {
-    "scale"            = 90,
-    "screen_width"     = 1200,
-    "screen_height"    = 800,
+configs := map[string] union{f32, u32} {
+    "scale"            = f32(90),
+    "screen_width"     = f32(1200),
+    "screen_height"    = f32(800),
 
-    "border_size"      = 8,
-    "line_size"        = 4,
-    "vertex_size"      = 10,
-    "dog_size"         = 32,
-    "jaguar_size"      = 25,
+    "border_size"      = f32(8),
+    "line_size"        = f32(4),
+    "vertex_size"      = f32(0.06),
+    "dog_size"         = f32(0.18),
+    "jaguar_size"      = f32(0.18),
 
-    "bg_color"         = 0x160802ff,
-    "fg_color"         = 0xd8a71eff,
-    "button_bg_color"  = 0x160802ff,
-    "button_fg_color"  = 0xd8a71eff,
-    "dog_color"        = 0x473d2fff,
-    "jaguar_color"     = 0xf2cf46ff,
-    "highlight_color"  = 0x0fa0b0ff,
-    "last_move_color"  = 0x10aa10ff,
+    "bg_color"         = u32(0x160802ff),
+    "fg_color"         = u32(0xd8a71eff),
+    "button_bg_color"  = u32(0x160802ff),
+    "button_fg_color"  = u32(0xd8a71eff),
+    "dog_color"        = u32(0x473d2fff),
+    "jaguar_color"     = u32(0xf2cf46ff),
+    "highlight_color"  = u32(0x0fa0b0ff),
+    "last_move_color"  = u32(0x10aa10ff),
 }
 
-SCALE:         f32 = cast(f32) configs["scale"] / 100
-SCREEN_WIDTH:  f32 = cast(f32) configs["screen_width"]
-SCREEN_HEIGHT: f32 = cast(f32) configs["screen_height"]
+SCALE:         f32 = configs["scale"].(f32) / 100
+SCREEN_WIDTH:  f32 = configs["screen_width"].(f32)
+SCREEN_HEIGHT: f32 = configs["screen_height"].(f32)
 UNIT:          f32 = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
 BOARD_WIDTH:   f32 = UNIT * 4
 BOARD_HEIGHT:  f32 = UNIT * 6
