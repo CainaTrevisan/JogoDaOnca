@@ -403,10 +403,10 @@ render_button :: proc(label: cstring, thickness: f32, rect: rl.Rectangle, hover:
     rl.DrawRectangleRec(rect, color1)
     render_highlight_around_rect(rect, thickness, rl.GetColor(configs["fg_color"]))
 
-    font_size: f32 : 30
-    text_size := cast(f32) rl.MeasureText(label, cast(i32)font_size)
-    w := rect.x + rect.width  / 2 - text_size * 0.34
-    h := rect.y + rect.height / 2 - font_size / 2
+    font_size: f32 = UNIT * 0.2
+    text_size := rl.MeasureTextEx(assets.font, label, font_size, 0)
+    w := rect.x + rect.width  * 0.5 - text_size.x * 0.5
+    h := rect.y + rect.height * 0.5 - font_size   * 0.5
     rl.DrawTextEx(assets.font, label, rl.Vector2{w, h}, font_size, 0, color2);
 }
 
@@ -535,7 +535,7 @@ render_rules :: proc(assets: Assets) {
     "Onça (sem movimentos possíveis).",
     }
 
-    font_size: f32 = 45
+    font_size: f32 = UNIT * 0.3
     w := SCREEN_WIDTH/2  - BOARD_WIDTH/2
     h := SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 - font_size
 
@@ -691,8 +691,6 @@ Assets :: struct {
     bgm:         rl.Music,
     font:        rl.Font,
 }
-
-// assets: Assets
 
 move_bytes    :: #load("move.wav")
 capture_bytes :: #load("capture.wav")
