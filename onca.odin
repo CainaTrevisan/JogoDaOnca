@@ -499,7 +499,7 @@ render_last_move :: proc(vertices: []rl.Vector2) {
     if is_jaguar_move {
         rl.DrawRing(end, jaguar_size, jaguar_size + border * 1.2,
         0, 360, 0, rl.GetColor(configs["last_move_color"]))
-    } else  if last_dog_move != {0, 0} {
+    } else if last_dog_move != {0, 0} {
         rect := rl.Rectangle {
             end.x - dog_size/2 - border,
             end.y - dog_size/2 - border,
@@ -555,13 +555,11 @@ render_victory :: proc (piece: Piece, assets: Assets) {
     switch piece {
 
     case .Jaguar:
-        mesg1 = "A ONCA"
-        mesg2 = "GANHOU"
+        mesg1, mesg2 = "A ONCA", "GANHOU"
         color = rl.GetColor(configs["jaguar_color"])
 
     case .Dog:
-        mesg1 = "OS CÃES"
-        mesg2 = "GANHARAM"
+        mesg1, mesg2 = "OS CÃES", "GANHARAM"
         color = rl.GetColor(configs["dog_color"])
 
     case .None: return
@@ -660,8 +658,8 @@ INITIAL_BOARD :: [NUM_VERTS]Piece {
     15 ..< NUM_VERTS = .None,
 }
 BOARD := INITIAL_BOARD
-jaguar_idx := 12
-drag_from  := -1
+jaguar_idx       := 12
+drag_from        := -1
 last_jaguar_move := [2]int{}
 last_dog_move    := [2]int{}
 score: u8 = '0'
@@ -717,6 +715,7 @@ import rl "vendor:raylib"
 [ ] collapse data into game_state, input and render structs
 [ ] refactor highlight last_move and highlight on hover code
 [ ] refactor button logic
+[ ] render_highlight_around does not seem useful
 
 [ ] Implement Skip button after captures ???
 [ ] animation for piece capture @VISUAL
