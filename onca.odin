@@ -221,10 +221,10 @@ update :: proc (
     if drag_from < 0 && rl.IsMouseButtonDown(.LEFT) {
         for piece, idx in BOARD {
             hit := false
-
+            collision_multiplier :: 2
             switch piece {
-            case .Jaguar: hit = rl.CheckCollisionPointCircle(mouse, vertices[idx], jaguar_size)
-            case .Dog:    hit = rl.CheckCollisionPointRec(mouse, center_rect(vertices[idx], dog_size))
+            case .Jaguar: hit = rl.CheckCollisionPointCircle(mouse, vertices[idx], jaguar_size * collision_multiplier)
+            case .Dog:    hit = rl.CheckCollisionPointRec(mouse, center_rect(vertices[idx], dog_size * collision_multiplier * 1.5))
             case .None:
             }
             if hit { drag_from = idx; break }
@@ -240,9 +240,10 @@ update :: proc (
             for to in moves {
                 if BOARD[to] != .None do continue
                 moved := false
+                collision_size := vertex_size * 4
                 switch {
                 case piece == .Jaguar && .Dogs_Turn not_in flags:
-                    if rl.CheckCollisionCircles(mouse, jaguar_size, vertices[to], vertex_size*3) {
+                    if rl.CheckCollisionCircles(mouse, jaguar_size, vertices[to], collision_size) {
                         moved = true
                         if to in adjacencies[drag_from] {
                             flags += {.Dogs_Turn}
@@ -255,7 +256,7 @@ update :: proc (
                         last_jaguar_move = {drag_from, to}
                     }
                 case piece == .Dog && .Dogs_Turn in flags:
-                    if rl.CheckCollisionCircleRec(vertices[to], vertex_size*3, center_rect(mouse, dog_size)) {
+                    if rl.CheckCollisionCircleRec(vertices[to], collision_size, center_rect(mouse, dog_size)) {
                         moved = true
                         flags -= {.Dogs_Turn}
                         last_dog_move = {drag_from, to}
@@ -574,9 +575,11 @@ render_rules :: proc(assets: Assets) {
     rl.ClearBackground(rl.GetColor(configs["bg_color"].(u32)))
 
     rules_text := []cstring {
-    "2 jogadores jogam em turnos: um com",
-    "a Onça, o outro com os Cachorros.",
+    "2 jogadores jogam em turnos: ",
     "",
+    "um com a Onça:",
+    "",
+    "o outro com os Cachorros:",
     "",
     "Em seu turno, mova uma peça para um",
     "vértice vizinho pelas linhas do",
@@ -600,10 +603,39 @@ render_rules :: proc(assets: Assets) {
     w := SCREEN_WIDTH/2  - BOARD_WIDTH/2
     h := SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 - font_size
 
-    for line in rules_text {
+    for line, idx in rules_text {
+        switch idx {
+        case 2:
+            jaguar_size,_  := configs["jaguar_size"].(f32)
+            color,_ := configs["jaguar_color"].(u32)
+            jaguar_size *= UNIT
+            padding := 0.2 * UNIT
+            mesg_size := rl.MeasureTextEx(assets.font, "um com a Onça:", font_size, 0)  
+            pos := rl.Vector2 {
+                w + mesg_size.x + jaguar_size + padding,
+                h + mesg_size.y + jaguar_size * 0.5
+            }
+            rl.DrawCircleV(pos, jaguar_size, rl.GetColor(color))
+
+        case 4:
+            dog_size,_ := configs["dog_size"].(f32)
+            color,_    := configs["dog_color"].(u32)
+            dog_size *= UNIT
+            padding := 0.2 * UNIT
+            mesg_size := rl.MeasureTextEx(assets.font, "o outro com os Cachorros", font_size, 0)  
+            rect := rl.Rectangle {
+                w + mesg_size.x + dog_size + padding,
+                h + mesg_size.y,
+                dog_size,
+                dog_size,
+            }
+            rl.DrawRectangleRec(rect, rl.GetColor(color))
+        }
         h += font_size * 0.75
         rl.DrawTextEx(assets.font, line, rl.Vector2{w, h}, font_size, 1, rl.RAYWHITE)
     }
+
+    
 
     render_button("Voltar", configs["line_size"].(f32), rules_rect, .Button_Hover in flags, assets)
 }
@@ -766,6 +798,7 @@ import rl "vendor:raylib"
 
 /*
 @TODO:
+[ ] Draw Highlight around pieces on rules
 [ ] Better Colors
 [ ] Implement images for the rules
 
