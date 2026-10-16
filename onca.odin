@@ -183,7 +183,7 @@ update :: proc (
         drag_from        = -1
         last_jaguar_move = {}
         last_dog_move    = {}
-        flags            = {}
+        flags            &= {.Mute_BGM}  
         score            = '0'
     }
 
@@ -642,8 +642,8 @@ CONFIG_PATH :: "onca.cfg"
 
 configs := map[string] union{f32, u32} {
     "scale"            = f32(90),
-    "screen_width"     = f32(400),
-    "screen_height"    = f32(800),
+    "screen_width"     = f32(800),
+    "screen_height"    = f32(1000),
 
     "border_size"      = f32(8),
     "line_size"        = f32(4),
@@ -756,7 +756,7 @@ layout_ui :: proc() {
     ui[.Board]      = {parent = .Turn_Mesg, size = board_size,       offset = {-board_size.x * 0.5, UNIT*0.4} }
     ui[.Triangle]   = {parent = .Board,     size = {2*UNIT, 2*UNIT}, offset = {UNIT, 4*UNIT}                  }
     ui[.Square]     = {parent = .Board,     size = {4*UNIT, 4*UNIT}                                           }
-    ui[.Score]      = {parent = .Board,                              offset = {0, 4.2*UNIT}                   }
+    ui[.Score]      = {parent = .Board,                              offset = {0, -UNIT*0.52}        }
     ui[.Win_Mesg]   = {parent = .Turn_Mesg,                                                                   }
     ui[.Rules_Text] = {parent = .Board,                                                                       }
 
