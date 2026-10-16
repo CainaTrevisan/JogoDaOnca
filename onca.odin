@@ -3,8 +3,6 @@ package onca
 
 main :: proc() {
 
-    vertices:  [dynamic; 32] rl.Vector2
-
     init_game()
     defer close_game()
 
@@ -14,11 +12,13 @@ main :: proc() {
     rl.PlayMusicStream(assets.bgm)
 
     for !rl.WindowShouldClose() {
-        read_configs_noblocking()
-        rl.UpdateMusicStream(assets.bgm)
+        @static frame: int
+        frame += 1
+        if frame % 30 == 0 do  read_configs_noblocking()
+        if .Mute_BGM not_in flags do rl.UpdateMusicStream(assets.bgm)
 
         adjacencies_and_captures: Adjacency
-        update(&vertices, &adjacencies_and_captures, assets)
+        update(&adjacencies_and_captures, assets)
 
         rl.BeginDrawing()
         defer rl.EndDrawing()
@@ -26,14 +26,15 @@ main :: proc() {
         if .Should_Render_Rules in flags {
             render_rules(assets)
         } else {
-            render_board(vertices[:], adjacencies_and_captures, assets)
-            render_pieces(vertices[:])
+            render_board(adjacencies_and_captures, assets)
+            render_pieces()
         }
     }
 }
 
 init_game :: proc() {
     build_topology()
+    build_vert_grid()
 
     nbio.acquire_thread_event_loop()
 
@@ -68,7 +69,7 @@ load_assets :: proc() -> Assets {
     // Font
     codepointCount: i32 = 0
     codepoints := rl.LoadCodepoints(
-        " !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZÃ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~",
+        " !\"#$%&'()*+,-./0123456789:;<=>?ABCDEFGHIJKLMNOPQRSTUVWXYZÃÇ[\\]^_`abcdefghijklmnopqrstuvwxyzçéáíó{|}~",
         &codepointCount
     )
     assets.font = rl.LoadFontFromMemory(".ttf", rawptr(raw_data(font_bytes)), cast(i32) len(font_bytes), 64, codepoints, codepointCount)
@@ -119,6 +120,7 @@ read_configs_noblocking :: proc() {
                 "dog_color",
                 "jaguar_color",
                 "highlight_color",
+                "turn_color",
                 "last_move_color",
             }
             valid := false
@@ -146,26 +148,12 @@ read_configs_noblocking :: proc() {
 }
 
 update :: proc (
-    vertices:  ^[dynamic; $O]rl.Vector2,
     adjacencies_and_captures: ^Adjacency,
     assets: Assets) {
 
-    update_scaling()
-    update_vertices(vertices)
-
-    border := configs["line_size"].(f32)
-    width  := UNIT * 0.6
-    height := UNIT * 0.4
-    rules_rect = rl.Rectangle {
-        SCREEN_WIDTH/2  - BOARD_WIDTH/2  + UNIT * 3 + (UNIT - width)  * 0.5,
-        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 + UNIT * 6 - (UNIT - height) * 0.71,
-        width,
-        height,
-    }
-
-    width = UNIT * 0.65
-    restart_rect = rules_rect
-    restart_rect.x =  SCREEN_WIDTH/2 - BOARD_WIDTH/2 + (UNIT - width)/2
+    layout_ui()
+    resolve_ui()
+    update_vertices()
 
     jaguar_size,_ := configs["jaguar_size"].(f32)
     dog_size,_    := configs["dog_size"].(f32)
@@ -176,23 +164,18 @@ update :: proc (
 
     mouse = rl.GetMousePosition()
 
-    if rl.CheckCollisionPointRec(mouse, rules_rect) {
-        flags += {.Button_Hover}
-        if rl.IsMouseButtonPressed(.LEFT) {
-            flags ~= {.Should_Render_Rules}
+    button :: proc(id: UI, hover: State_Flags) -> (clicked: bool) {
+        if rl.CheckCollisionPointRec(mouse, rect_from_ui_elem(ui[id])) {
+            flags  += {hover}
+            clicked = rl.IsMouseButtonPressed(.LEFT)
+        } else {
+            flags -= {hover}
         }
-    } else {
-        flags -= {.Button_Hover}
+        return
     }
 
-    if rl.CheckCollisionPointRec(mouse, restart_rect) {
-        flags += {.Restart_Hover}
-        if rl.IsMouseButtonPressed(.LEFT) {
-            flags += {.Should_Restart}
-        }
-    } else {
-        flags -= {.Restart_Hover}
-    }
+    if button(.Rules_Button,   .Button_Hover)  do flags ~= {.Should_Render_Rules}
+    if button(.Restart_Button, .Restart_Hover) do flags += {.Should_Restart}
 
     if .Should_Restart in flags {
         BOARD            = INITIAL_BOARD
@@ -204,6 +187,10 @@ update :: proc (
         score            = '0'
     }
 
+    if rl.IsKeyPressed(.M) {
+        flags ~= {.Mute_BGM}
+    }
+
     adjacencies_and_captures^ = compute_possible_captures()
 
     if .Last_Move_Was_Capture in flags {
@@ -213,9 +200,6 @@ update :: proc (
         }
     }
 
-    if check_if_dogs_won(adjacencies_and_captures^) {
-        flags += {.Dogs_Won}
-    }
     game_over := score == '5' || .Dogs_Won in flags
 
     if drag_from < 0 && rl.IsMouseButtonDown(.LEFT) {
@@ -272,20 +256,13 @@ update :: proc (
         }
         drag_from = -1
     }
+    if check_if_dogs_won(adjacencies_and_captures^) {
+        flags += {.Dogs_Won}
+    }
 }
 
 center_rect :: proc(pos: rl.Vector2, size: f32) -> rl.Rectangle {
     return {pos.x - size/2, pos.y - size/2, size, size}
-}
-
-update_scaling :: proc() {
-    SCREEN_WIDTH  = cast(f32) rl.GetScreenWidth()
-    SCREEN_HEIGHT = cast(f32) rl.GetScreenHeight()
-    scale, ok     := configs["scale"].(f32)
-    SCALE         = scale * 0.01
-    UNIT          = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
-    BOARD_WIDTH   = UNIT * 4
-    BOARD_HEIGHT  = UNIT * 6
 }
 
 compute_possible_captures :: proc() -> Adjacency {
@@ -301,37 +278,6 @@ compute_possible_captures :: proc() -> Adjacency {
     return adjacencies_and_captures
 }
 
-update_vertices :: proc (vertices: ^[dynamic; $N] rl.Vector2) {
-
-    clear(vertices)
-    origin := rl.Vector2{ SCREEN_WIDTH/2  - BOARD_WIDTH/2,
-                          SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 }
-
-    center := origin
-
-    // Square
-    for i in 1 ..< 6 {
-        for j in 1 ..< 6 {
-            append(vertices, center)
-            center += rl.Vector2{UNIT, 0}
-        }
-        center = rl.Vector2{origin.x, origin.y + cast(f32)i * UNIT}
-    }
-
-    // Triangle
-    center = rl.Vector2{origin.x + 1.5 * UNIT, origin.y + 5 * UNIT}
-    for _ in 0 ..< 3 {
-        append(vertices, center)
-        center += rl.Vector2{UNIT/2, 0}
-    }
-
-    center = rl.Vector2{origin.x + UNIT, origin.y + 6 * UNIT}
-    for _ in 0 ..< 3 {
-        append(vertices, center)
-        center += rl.Vector2{UNIT, 0}
-    }
-}
-
 check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
 
     if .Dogs_Turn in flags do return false
@@ -342,32 +288,29 @@ check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
     return true
 }
 
-render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency, assets: Assets) {
+render_board :: proc(adjacencies_and_captures: Adjacency, assets: Assets) {
     vertex_size,_     := configs["vertex_size"].(f32)
     line_size,_       := configs["line_size"].(f32)
     bg_color,_        := configs["bg_color"].(u32)
     fg_color,_        := configs["fg_color"].(u32)
     last_move_color,_ := configs["last_move_color"].(u32)
     highlight_color,_ := configs["highlight_color"].(u32)
+    jaguar_color,_    := configs["jaguar_color"].(u32)
+    dog_color,_       := configs["dog_color"].(u32)
+    turn_color,_      := configs["turn_color"].(u32)
     vertex_size *= UNIT
-    // line_size *= UNIT
 
     // Background
     rl.ClearBackground(rl.GetColor(bg_color))
 
     // Board Square
-    rect := rl.Rectangle {
-        SCREEN_WIDTH/2  - BOARD_WIDTH/2,
-        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
-        BOARD_WIDTH,
-        BOARD_WIDTH,
-    }
-    rl.DrawRectangleRec(rect, rl.GetColor(configs["fg_color"].(u32)))
+    rl.DrawRectangleRec(rect_from_ui_elem(ui[.Square]), rl.GetColor(fg_color))
 
     // Board Triangle
-    v1 := rl.Vector2{SCREEN_WIDTH/2, rect.y + UNIT * 4}
-    v2 := rl.Vector2{v1.x - UNIT, v1.y + 2*UNIT}
-    v3 := rl.Vector2{v1.x + UNIT, v1.y + 2*UNIT}
+    t  := ui[.Triangle]
+    v1 := rl.Vector2{t.pos.x + t.size.x * 0.5, t.pos.y}
+    v2 := rl.Vector2{t.pos.x, t.pos.y + t.size.y}
+    v3 := t.pos + t.size
     rl.DrawTriangle(v1, v2, v3, rl.GetColor(fg_color))
 
     // Lines
@@ -393,14 +336,12 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
     rl.DrawLineEx(vertices[25], vertices[27], 4, rl.GetColor(bg_color))
 
     // Score
-    w := rect.x
-    h := rect.y + 4.2 * UNIT
-    font_size := UNIT * 0.45
     score_text := cstring(raw_data([]u8{score, 0}))
-    rl.DrawTextEx(assets.font, score_text, rl.Vector2{w, h}, font_size, 0, rl.LIGHTGRAY);
+    font_size := UNIT * 0.45
+    rl.DrawTextEx(assets.font, score_text, ui[.Score].pos, font_size, 0, rl.LIGHTGRAY);
 
     // Render Last Move
-    render_last_move(vertices[:])
+    render_last_move()
 
     highlight_from := drag_from
     if .Last_Move_Was_Capture in flags && score != '5' {
@@ -435,20 +376,13 @@ render_board :: proc(vertices: []rl.Vector2, adjacencies_and_captures: Adjacency
         )
     }
 
-    render_button("Regras",    line_size, rules_rect,   .Button_Hover  in flags, assets)
-    render_button("Reiniciar", line_size, restart_rect, .Restart_Hover in flags, assets)
-
-    if score == '5' {
-        render_victory(.Jaguar, assets)
-        return
-    }
-    if .Dogs_Won in flags {
-        render_victory(.Dog, assets)
-        return
-    }
+    render_status(assets)
+    render_button(.Rules_Button,   "Regras",    line_size, .Button_Hover  in flags, assets)
+    render_button(.Restart_Button, "Reiniciar", line_size, .Restart_Hover in flags, assets)
 }
 
-render_button :: proc(label: cstring, thickness: f32, rect: rl.Rectangle, hover: bool, assets: Assets) {
+render_button :: proc(id: UI, label: cstring, thickness: f32, hover: bool, assets: Assets) {
+    rect   := rect_from_ui_elem(ui[id])
     color1 := rl.GetColor(configs["button_fg_color"].(u32))
     color2 := rl.GetColor(configs["button_bg_color"].(u32))
     if hover do color1, color2 = color2, color1
@@ -475,13 +409,14 @@ render_highlight_around_circle :: proc (center: rl.Vector2, size: f32, thickness
     rl.DrawRing(center, size, size + thickness, 0, 360, 0, color)
 }
 
-render_pieces :: proc(vertices: []rl.Vector2) {
+render_pieces :: proc() {
     jaguar_size,_     := configs["jaguar_size"].(f32)
     dog_size,_        := configs["dog_size"].(f32)
     line_size,_       := configs["line_size"].(f32)
     jaguar_color,_    := configs["jaguar_color"].(u32)
     dog_color,_       := configs["dog_color"].(u32)
     highlight_color,_ := configs["highlight_color"].(u32)
+    turn_color,_      := configs["turn_color"].(u32)
     jaguar_size *= UNIT
     dog_size *= UNIT
 
@@ -489,6 +424,7 @@ render_pieces :: proc(vertices: []rl.Vector2) {
 
     for piece, idx in BOARD {
         if piece == .None do continue
+        hl_color := rl.Color{0,0,0,255}
         if piece == .Dog {
             rect  := center_rect(vertices[idx], dog_size)
             color := rl.GetColor(dog_color)
@@ -496,7 +432,10 @@ render_pieces :: proc(vertices: []rl.Vector2) {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
             rl.DrawRectangleRec(rect, color)
-            render_highlight_around_rect(rect, line_size, rl.Color{0,0,0,255})
+            if .Dogs_Turn in flags {
+                hl_color = rl.GetColor(turn_color)
+            }
+            render_highlight_around_rect(rect, line_size, hl_color)
 
         } else if piece == .Jaguar {
             color := rl.GetColor(jaguar_color)
@@ -504,11 +443,14 @@ render_pieces :: proc(vertices: []rl.Vector2) {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
             rl.DrawCircleV(vertices[idx], jaguar_size, color)
+            if .Dogs_Turn not_in flags {
+                hl_color = rl.GetColor(turn_color)
+            }
             render_highlight_around_circle(
                 vertices[idx],
                 jaguar_size,
                 line_size,
-                rl.Color{0,0,0,255}
+                hl_color
             )
         }
     }
@@ -531,12 +473,12 @@ render_pieces :: proc(vertices: []rl.Vector2) {
     }
 }
 
-render_last_move :: proc(vertices: []rl.Vector2) {
+render_last_move :: proc() {
     jaguar_size,_ := configs["jaguar_size"].(f32)
     dog_size,_    := configs["dog_size"].(f32)
     vertex_size,_ := configs["vertex_size"].(f32)
     vertex_size   *= UNIT
-    jaguar_size    *= UNIT
+    jaguar_size   *= UNIT
     dog_size      *= UNIT
 
     last_move := last_jaguar_move if .Dogs_Turn in flags || .Last_Move_Was_Capture in flags else
@@ -600,29 +542,36 @@ render_rules :: proc(assets: Assets) {
     }
 
     font_size: f32 = UNIT * 0.3
-    w := SCREEN_WIDTH/2  - BOARD_WIDTH/2
-    h := SCREEN_HEIGHT/2 - BOARD_HEIGHT/2 - font_size
+    origin := ui[.Rules_Text].pos
+    w, h   := origin.x, origin.y
+    line_size,_ := configs["line_size"].(f32)
 
     for line, idx in rules_text {
         switch idx {
-        case 2:
-            jaguar_size,_  := configs["jaguar_size"].(f32)
-            color,_ := configs["jaguar_color"].(u32)
+        case 1:
+            jaguar_size,_ := configs["jaguar_size"].(f32)
+            color,_       := configs["jaguar_color"].(u32)
             jaguar_size *= UNIT
             padding := 0.2 * UNIT
-            mesg_size := rl.MeasureTextEx(assets.font, "um com a Onça:", font_size, 0)  
+            mesg_size := rl.MeasureTextEx(assets.font, "um com a Onça:", font_size, 0)
             pos := rl.Vector2 {
                 w + mesg_size.x + jaguar_size + padding,
                 h + mesg_size.y + jaguar_size * 0.5
             }
             rl.DrawCircleV(pos, jaguar_size, rl.GetColor(color))
+            render_highlight_around_circle(
+                pos,
+                jaguar_size,
+                line_size,
+                rl.GetColor(configs["turn_color"].(u32)),
+            )
 
-        case 4:
+        case 3:
             dog_size,_ := configs["dog_size"].(f32)
             color,_    := configs["dog_color"].(u32)
             dog_size *= UNIT
-            padding := 0.2 * UNIT
-            mesg_size := rl.MeasureTextEx(assets.font, "o outro com os Cachorros", font_size, 0)  
+            padding := 0.15 * UNIT
+            mesg_size := rl.MeasureTextEx(assets.font, "o outro com os Cachorros", font_size, 0)
             rect := rl.Rectangle {
                 w + mesg_size.x + dog_size + padding,
                 h + mesg_size.y,
@@ -630,45 +579,39 @@ render_rules :: proc(assets: Assets) {
                 dog_size,
             }
             rl.DrawRectangleRec(rect, rl.GetColor(color))
+            render_highlight_around_rect(rect, line_size, rl.GetColor(configs["turn_color"].(u32)))
         }
-        h += font_size * 0.75
         rl.DrawTextEx(assets.font, line, rl.Vector2{w, h}, font_size, 1, rl.RAYWHITE)
+        h += font_size * 0.75
     }
 
-    
-
-    render_button("Voltar", configs["line_size"].(f32), rules_rect, .Button_Hover in flags, assets)
+    render_button(.Rules_Button, "Voltar", line_size, .Button_Hover in flags, assets)
 }
 
 
-render_victory :: proc (piece: Piece, assets: Assets) {
-    mesg1, mesg2: cstring
-    color: rl.Color
-
-    switch piece {
-
-    case .Jaguar:
-        mesg1, mesg2 = "A ONCA", "GANHOU"
-        color = rl.GetColor(configs["jaguar_color"].(u32))
-
-    case .Dog:
-        mesg1, mesg2 = "OS CÃES", "GANHARAM"
+render_status :: proc (assets: Assets) {
+    mesg1, mesg2: cstring = "ONCA ", "JOGA"
+    color  := rl.GetColor(configs["jaguar_color"].(u32))
+    color2 := rl.GetColor(configs["turn_color"].(u32))
+    if score == '5' {
+        mesg1, mesg2 = "ONÇA ", "GANHOU"
+        color2 = color
+    } else if .Dogs_Won in flags {
+        mesg1, mesg2 = "CACHORROS ", "GANHARAM"
+        color  = rl.GetColor(configs["dog_color"].(u32))
+        color2 = color
+    } else if .Dogs_Turn in flags {
+        mesg1, mesg2 = "CACHORROS ", "JOGAM"
         color = rl.GetColor(configs["dog_color"].(u32))
-
-    case .None: return
     }
 
-    // Board Square
-    rect := rl.Rectangle {
-        SCREEN_WIDTH/2  - BOARD_WIDTH/2,
-        SCREEN_HEIGHT/2 - BOARD_HEIGHT/2,
-        BOARD_WIDTH,
-        BOARD_WIDTH,
-    }
-    w := rect.x
-    h := rect.y + UNIT * 4.5
-    rl.DrawTextEx(assets.font, mesg1, rl.Vector2{w, h},      36, 0, color);
-    rl.DrawTextEx(assets.font, mesg2, rl.Vector2{w, h + 38}, 36, 0, color);
+    pos := ui[.Turn_Mesg].pos
+    font_size := UNIT * 0.2
+    mesg1_size := rl.MeasureTextEx(assets.font, mesg1, font_size, 0)
+    mesg2_size := rl.MeasureTextEx(assets.font, mesg2, font_size, 0)
+    pos.x -= (mesg1_size.x + mesg2_size.x) * 0.5
+    rl.DrawTextEx(assets.font, mesg1, pos, font_size, 0, color)
+    rl.DrawTextEx(assets.font, mesg2, pos + {mesg1_size.x, 0}, font_size, 0, color2)
 }
 
 build_topology :: proc() {
@@ -699,7 +642,7 @@ CONFIG_PATH :: "onca.cfg"
 
 configs := map[string] union{f32, u32} {
     "scale"            = f32(90),
-    "screen_width"     = f32(1200),
+    "screen_width"     = f32(400),
     "screen_height"    = f32(800),
 
     "border_size"      = f32(8),
@@ -715,6 +658,7 @@ configs := map[string] union{f32, u32} {
     "dog_color"        = u32(0x473d2fff),
     "jaguar_color"     = u32(0xf2cf46ff),
     "highlight_color"  = u32(0x0fa0b0ff),
+    "turn_color"       = u32(0xb04628ff),
     "last_move_color"  = u32(0x10aa10ff),
 }
 
@@ -722,6 +666,7 @@ SCALE:         f32 = configs["scale"].(f32) / 100
 SCREEN_WIDTH:  f32 = configs["screen_width"].(f32)
 SCREEN_HEIGHT: f32 = configs["screen_height"].(f32)
 UNIT:          f32 = min(SCREEN_WIDTH * SCALE / 4, SCREEN_HEIGHT * SCALE / 6)
+
 BOARD_WIDTH:   f32 = UNIT * 4
 BOARD_HEIGHT:  f32 = UNIT * 6
 
@@ -737,6 +682,7 @@ State_Flags :: enum {
     Dogs_Turn,
     Last_Move_Was_Capture,
     Dogs_Won,
+    Mute_BGM,
 }
 flags: bit_set[State_Flags]
 
@@ -776,6 +722,84 @@ JUMPS: [dynamic; 96]Jump
 Adjacency :: [31]bit_set[0..<31]
 adjacencies: Adjacency
 
+
+build_vert_grid :: proc() {
+    n := 0
+    for row in 0..<5 {
+        for col in 0..<5 {
+            vert_grid[n] = {f32(col), f32(row)}
+            n += 1
+        }
+    }
+    for i in 0..<3 { vert_grid[n] = {1.5 + f32(i)*0.5, 5}; n += 1 }   // 25..27
+    for i in 0..<3 { vert_grid[n] = {1.0 + f32(i),     6}; n += 1 }
+
+}
+
+update_vertices :: proc() {
+    pos := ui[.Board].pos
+    for row, idx in vert_grid do vertices[idx] = pos + row * UNIT
+}
+
+layout_ui :: proc() {
+    screen := rl.Vector2{
+        cast(f32) rl.GetScreenWidth(),
+        cast(f32) rl.GetScreenHeight(),
+    }
+    scale := configs["scale"].(f32) * 0.01
+    UNIT  = min(screen.x * scale / 4, screen.y * scale / 6)
+
+    board_size := rl.Vector2{4*UNIT, 6*UNIT}
+
+    ui[.Screen]     = {parent = .Screen,    size = screen                                                     }
+    ui[.Turn_Mesg]  = {parent = .Screen,                             offset = {screen.x * 0.5, UNIT*0.1}      }
+    ui[.Board]      = {parent = .Turn_Mesg, size = board_size,       offset = {-board_size.x * 0.5, UNIT*0.4} }
+    ui[.Triangle]   = {parent = .Board,     size = {2*UNIT, 2*UNIT}, offset = {UNIT, 4*UNIT}                  }
+    ui[.Square]     = {parent = .Board,     size = {4*UNIT, 4*UNIT}                                           }
+    ui[.Score]      = {parent = .Board,                              offset = {0, 4.2*UNIT}                   }
+    ui[.Win_Mesg]   = {parent = .Turn_Mesg,                                                                   }
+    ui[.Rules_Text] = {parent = .Board,                                                                       }
+
+    w := 0.5 * UNIT
+    h := 0.4 * UNIT
+    y := 6 * UNIT - (UNIT - h) * 0.71
+    ui[.Rules_Button]   = {parent = .Board, size = {w, h}, offset = {3*UNIT + (UNIT - w) * 0.5, y} }
+    ui[.Restart_Button] = {parent = .Board, size = {w + UNIT*0.1, h}, offset = {(UNIT - w) * 0.5, y} }
+}
+
+resolve_ui :: proc() {
+    for &e in ui do e.pos = e.offset + ui[e.parent].pos
+}
+
+UI :: enum {
+    Screen,
+    Turn_Mesg,
+    Board,
+    Square,
+    Triangle,
+    Score,
+    Win_Mesg,
+    Rules_Text,
+    Rules_Button,
+    Restart_Button,
+}
+
+UI_Elem :: struct {
+    parent: UI,
+    offset: rl.Vector2,
+    pos:    rl.Vector2,
+    size:   rl.Vector2,
+}
+
+ui: [UI]UI_Elem
+vertices:  [NUM_VERTS]rl.Vector2
+vert_grid: [NUM_VERTS]rl.Vector2
+
+rect_from_ui_elem :: proc(e: UI_Elem) -> rl.Rectangle {
+    return rl.Rectangle{e.pos.x, e.pos.y, e.size.x, e.size.y}
+}
+
+
 Assets :: struct {
     sfx_move:    rl.Sound,
     sfx_capture: rl.Sound,
@@ -798,14 +822,15 @@ import rl "vendor:raylib"
 
 /*
 @TODO:
-[ ] Draw Highlight around pieces on rules
 [ ] Better Colors
 [ ] Implement images for the rules
+[ ] Mute button
+[ ] Volume control
 
 @BUGS:
-[] after restart dragging pieces does not work
 
 @REFACTOR:
+[ ] retain board square state for rendering
 [ ] collapse data into game_state, input and render structs
 [ ] refactor highlight last_move and highlight on hover code
 [ ] refactor button logic
