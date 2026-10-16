@@ -821,27 +821,25 @@ import "core:strconv"
 import rl "vendor:raylib"
 
 /*
-@TODO:
+@TODO
 [ ] Better Colors
+
+@FEATURES
 [ ] Implement images for the rules
 [ ] Mute button
 [ ] Volume control
+[ ] Implement Skip button after captures ???
+[ ] Change highlight color for piece that could be captured on a possible move
+[ ] animation for piece capture @VISUAL
+[ ] implement networking
+[ ] implement computer AI
 
 @BUGS:
 
 @REFACTOR:
 [ ] retain board square state for rendering
 [ ] collapse data into game_state, input and render structs
-[ ] refactor highlight last_move and highlight on hover code
-[ ] refactor button logic
 [ ] render_highlight_around does not seem useful
-
-[ ] Implement Skip button after captures ???
-[ ] animation for piece capture @VISUAL
-[ ] Change highlight color for piece that could be captured on a possible move
 [ ] recompute rects, triangles, and lines for rendering the board only on resize
-[ ] implement networking
-[ ] implement computer AI
-
 */
 
