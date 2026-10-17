@@ -12,10 +12,11 @@ main :: proc() {
         @static frame: int
         frame += 1
         if frame % 30 == 0 do read_configs_noblocking()
+
         if .Mute_BGM not_in ui.flags do rl.UpdateMusicStream(ui.assets.bgm)
 
-        adjacencies_and_captures: Adjacency
-        update(&adjacencies_and_captures)
+        update()
+        moves := legal_moves(game)
 
         rl.BeginDrawing()
         defer rl.EndDrawing()
@@ -23,7 +24,7 @@ main :: proc() {
         if .Render_Rules in ui.flags {
             render_rules()
         } else {
-            render_board(adjacencies_and_captures)
+            render_board()
             render_pieces()
         }
     }
@@ -141,7 +142,7 @@ read_configs_noblocking :: proc() {
     nbio.read_entire_file(CONFIG_PATH, &config_file_buffer, parse_config_file)
 }
 
-update :: proc (adjacencies_and_captures: ^Adjacency) {
+update :: proc() {
 
     layout_ui()
     update_vertices()
@@ -173,19 +174,10 @@ update :: proc (adjacencies_and_captures: ^Adjacency) {
         ui.flags ~= {.Mute_BGM}
     }
 
-    adjacencies_and_captures^ = compute_possible_captures()
-    if check_if_dogs_won(adjacencies_and_captures^) {
+    moves := legal_moves(game)
+    if game.turn == .Jaguar && len(moves) == 0 && game.score < 5 {
         ui.flags += {.Dogs_Won}
     }
-
-    if game.chain {
-        if adjacencies_and_captures[game.jaguar] - adjacencies[game.jaguar] == {} {
-            game.turn = .Dogs
-            game.chain = false
-        }
-    }
-
-    game_over := game.score == 5 || .Dogs_Won in ui.flags
 
     if drag_from < 0 && rl.IsMouseButtonDown(.LEFT) {
         for piece, idx in game.board {
@@ -201,42 +193,27 @@ update :: proc (adjacencies_and_captures: ^Adjacency) {
     }
 
     if rl.IsMouseButtonUp(.LEFT) {
-        if !game_over && drag_from >= 0 {
+        if drag_from >= 0 {
             piece := game.board[drag_from]
-            moves := adjacencies_and_captures[drag_from]
-            if game.chain do moves -= adjacencies[drag_from]
+            collision_size := ui.vertex_size * 4
+            moves := legal_moves(game)
+            for m in moves {
+                if m.from != drag_from do continue
 
-            for to in moves {
-                if game.board[to] != .None do continue
-                moved := false
-                collision_size := ui.vertex_size * 4
-                switch {
-                case piece == .Jaguar && game.turn == .Jaguar:
-                    if rl.CheckCollisionCircles(mouse, ui.jaguar_size, vertices[to], collision_size) {
-                        moved = true
-                        if to in adjacencies[drag_from] {
-                            game.turn = .Dogs
-                        } else {                                   // a jump
-                            over,_ := find_jump(drag_from, to)
-                            game.board[over] = .None
-                            game.score += 1
-                            game.chain = true
-                        }
-                        last_jaguar_move = {drag_from, to}
-                    }
-                case piece == .Dog && game.turn == .Dogs:
-                    if rl.CheckCollisionCircleRec(vertices[to], collision_size, center_rect(mouse, ui.dog_size)) {
-                        moved = true
-                        game.turn = .Jaguar
-                        last_dog_move = {drag_from, to}
-                    }
+                hit: bool
+                if piece == .Jaguar {
+                    hit = rl.CheckCollisionCircles(mouse, ui.jaguar_size, vertices[m.to], collision_size)
+                } else {
+                   hit = rl.CheckCollisionCircleRec(vertices[m.to], collision_size, center_rect(mouse, ui.dog_size))
                 }
-                if moved {
-                    game.board[drag_from], game.board[to] = .None, piece
-                    if piece == .Jaguar do game.jaguar = to
-                    rl.PlaySound(ui.assets.sfx_capture if game.chain else ui.assets.sfx_move)
-                    break
-                }
+
+                if !hit do continue
+
+                if piece == .Jaguar { last_jaguar_move = {m.from, m.to} }
+                else                { last_dog_move    = {m.from, m.to} }
+                apply_move(&game, m)
+                rl.PlaySound(ui.assets.sfx_capture if m.over >= 0 else ui.assets.sfx_move)
+                break
             }
         }
         drag_from = -1
@@ -247,30 +224,21 @@ center_rect :: proc(pos: rl.Vector2, size: f32) -> rl.Rectangle {
     return {pos.x - size/2, pos.y - size/2, size, size}
 }
 
-compute_possible_captures :: proc() -> Adjacency {
+compute_possible_captures :: proc(g: Game) -> Adjacency {
     adjacencies_and_captures := adjacencies
 
     for j in JUMPS {
-        if j.from             == game.jaguar &&
-           game.board[j.over] == .Dog        &&
-           game.board[j.to]   == .None {
-                adjacencies_and_captures[game.jaguar] += {j.to}
+        if j.from             == g.jaguar &&
+           g.board[j.over] == .Dog     &&
+           g.board[j.to]   == .None {
+
+            adjacencies_and_captures[g.jaguar] += {j.to}
         }
     }
     return adjacencies_and_captures
 }
 
-check_if_dogs_won :: proc(adjacencies_and_captures: Adjacency) -> bool {
-
-    if game.turn == .Dogs do return false
-
-    for vert in adjacencies_and_captures[game.jaguar] {
-        if game.board[vert] == .None do return false
-    }
-    return true
-}
-
-render_board :: proc(adjacencies_and_captures: Adjacency) {
+render_board :: proc() {
     bg_color,_        := configs["bg_color"].(u32)
     fg_color,_        := configs["fg_color"].(u32)
     last_move_color,_ := configs["last_move_color"].(u32)
@@ -322,29 +290,25 @@ render_board :: proc(adjacencies_and_captures: Adjacency) {
     // Render Last Move
     render_last_move()
 
-    highlight_from := drag_from
-    if game.chain && game.score != 5 {
-        highlight_from = game.jaguar
+    highlighted: bit_set[0..<NUM_VERTS]
+    if drag_from >= 0 {
+        g := game
+        g.turn = game.board[drag_from]
+        for m in legal_moves(g) do if m.from == drag_from do highlighted += {m.to}
     }
 
     // Render vertices
     for v, idx in vertices {
         color := rl.WHITE
-        last_move := last_jaguar_move if game.turn == .Dogs || game.chain else
+
+        last_move := last_jaguar_move if game.turn == .Dog || game.chain else
                      last_dog_move
 
         if idx == last_move[0] {
             color = rl.GetColor(last_move_color)
         }
-        if highlight_from >= 0 {
-            possible_moves := adjacencies_and_captures[highlight_from]
-            if game.chain {
-                possible_moves -= adjacencies[highlight_from]
-            }
-            if idx in possible_moves {
-                color = rl.GetColor(highlight_color)
-            }
-        }
+
+        if idx in highlighted do color = rl.GetColor(highlight_color)
 
         rl.DrawCircleV(v, ui.vertex_size, color)
         render_highlight_around_circle(
@@ -406,7 +370,7 @@ render_pieces :: proc() {
                 color = rl.ColorLerp(color, rl.Color{0, 0, 0, 255}, LERP)
             }
             rl.DrawRectangleRec(rect, color)
-            if game.turn == .Dogs {
+            if game.turn == .Dog {
                 hl_color = rl.GetColor(turn_color)
             }
             render_highlight_around_rect(rect, ui.line_size, hl_color)
@@ -449,10 +413,10 @@ render_pieces :: proc() {
 
 render_last_move :: proc() {
 
-    last_move := last_jaguar_move if game.turn == .Dogs || game.chain else
+    last_move := last_jaguar_move if game.turn == .Dog || game.chain else
                  last_dog_move
 
-    is_jaguar_move := game.turn == .Dogs || game.chain
+    is_jaguar_move := game.turn == .Dog || game.chain
 
     border,_ := configs["border_size"].(f32)
 
@@ -563,7 +527,7 @@ render_status :: proc () {
         mesg1, mesg2 = "CACHORROS ", "GANHARAM"
         color  = rl.GetColor(configs["dog_color"].(u32))
         color2 = color
-    } else if game.turn == .Dogs {
+    } else if game.turn == .Dog {
         mesg1, mesg2 = "CACHORROS ", "JOGAM"
         color = rl.GetColor(configs["dog_color"].(u32))
     }
@@ -705,18 +669,19 @@ LINES := [?][]int {
 }
 
 BENT_JUMPS :: [?]Jump { {16, 22, 27}, {18, 22, 25} }
-JUMPS: [dynamic; 96]Jump
+JUMPS: [dynamic;  96]Jump
+
+Moves :: [dynamic; 128]Jump
 
 Adjacency :: [31]bit_set[0..<31]
 adjacencies: Adjacency
 
-Side :: enum {Jaguar, Dogs}
 
 Game :: struct {
     board: [NUM_VERTS]Piece,
     jaguar: int,
     score:  u8,
-    turn:   Side,
+    turn:   Piece,
     chain:  bool,
 }
 
@@ -728,6 +693,7 @@ INITIAL_GAME :: Game {
         15 ..< NUM_VERTS = .None,
     },
     jaguar = 12,
+    turn   = .Jaguar,
 }
 game := INITIAL_GAME
 
@@ -790,10 +756,55 @@ rect_from_ui_elem :: proc(kind: UI_Kind) -> rl.Rectangle {
     return rl.Rectangle{e.pos.x, e.pos.y, e.size.x, e.size.y}
 }
 
+legal_moves :: proc(g: Game) -> (moves: Moves){
+    if g.turn == .Jaguar {
+        adj := compute_possible_captures(g)
+        if g.chain do adj -= adjacencies[g.jaguar]
+        for move in adj[g.jaguar] {
+            if g.board[move] != .None do continue
+            over,_ := find_jump(g.jaguar, move)
+            append(&moves, Jump{g.jaguar, over, move})
+        }
+    } else {
+        for piece, from in g.board {
+            if piece != .Dog do continue
+            for to in adjacencies[from] {
+                if g.board[to] != .None do continue
+                append(&moves, Jump{from, -1, to})
+            }
+        }
+    }
+    return
+}
+
+apply_move  :: proc(g: ^Game, j: Jump) {
+
+    if g.score >= 5 do return
+    if g.turn == .Dog {
+        if g.board[j.from] != .Dog || j.over != -1 || g.chain do return
+    } else {
+        if g.board[j.from] != .Jaguar do return
+        g.jaguar = j.to
+    }
+
+    g.board[j.from] = .None
+    g.board[j.to]   = g.turn
+    if j.over > 0 {
+        g.board[j.over] = .None
+        g.score += 1
+        g.chain = true
+        if len(legal_moves(g^)) == 0 {
+            g.chain = false
+            g.turn  = .Dog
+        }
+    } else {
+        g.turn = .Dog if g.turn == .Jaguar else .Jaguar
+    }
+}
+
 /*
 
 AI:
-legal_moves :: proc(g: Game) -> []Jumps
 apply_move  :: proc(g: ^Game, j: Jump)
 evaluate_position :: proc(g: Game) -> (evaluation: int)
 
@@ -824,6 +835,8 @@ import rl "vendor:raylib"
 [ ] implement computer AI
 
 @BUGS:
+[ ] move sound playing after game over
+[ ] possible moves not being displayed for enemy team
 
 @REFACTOR:
 [ ] all configs in ui
