@@ -16,7 +16,7 @@ main :: proc() {
         if .Mute_BGM not_in ui.flags do rl.UpdateMusicStream(ui.assets.bgm)
 
         update()
-        moves := legal_moves(game)
+        evaluate_position(game)
 
         rl.BeginDrawing()
         defer rl.EndDrawing()
@@ -224,18 +224,16 @@ center_rect :: proc(pos: rl.Vector2, size: f32) -> rl.Rectangle {
     return {pos.x - size/2, pos.y - size/2, size, size}
 }
 
-compute_possible_captures :: proc(g: Game) -> Adjacency {
-    adjacencies_and_captures := adjacencies
-
+compute_possible_captures :: proc(g: Game) -> (captures: bit_set[0..<NUM_VERTS]) {
     for j in JUMPS {
-        if j.from             == g.jaguar &&
+        if j.from          == g.jaguar &&
            g.board[j.over] == .Dog     &&
            g.board[j.to]   == .None {
 
-            adjacencies_and_captures[g.jaguar] += {j.to}
+            captures += {j.to}
         }
     }
-    return adjacencies_and_captures
+    return
 }
 
 render_board :: proc() {
@@ -756,10 +754,14 @@ rect_from_ui_elem :: proc(kind: UI_Kind) -> rl.Rectangle {
     return rl.Rectangle{e.pos.x, e.pos.y, e.size.x, e.size.y}
 }
 
-legal_moves :: proc(g: Game) -> (moves: Moves){
+legal_moves :: proc(g: Game, exclude_captures := false) -> (moves: Moves){
+    if g.score >= 5 do return
+
     if g.turn == .Jaguar {
-        adj := compute_possible_captures(g)
-        if g.chain do adj -= adjacencies[g.jaguar]
+        adj: Adjacency
+        if !exclude_captures do adj[g.jaguar] += compute_possible_captures(g)
+        if !g.chain do adj += adjacencies[g.jaguar]
+
         for move in adj[g.jaguar] {
             if g.board[move] != .None do continue
             over,_ := find_jump(g.jaguar, move)
@@ -802,13 +804,51 @@ apply_move  :: proc(g: ^Game, j: Jump) {
     }
 }
 
-/*
+evaluate_position :: proc(g: Game) -> (evaluation: f32) {
 
-AI:
-apply_move  :: proc(g: ^Game, j: Jump)
-evaluate_position :: proc(g: Game) -> (evaluation: int)
+    g := g
+    g.turn = .Jaguar
+    g.chain = false
 
-*/
+    SCORE_WEIGHT          :: 8.0
+    CAPTURE_WEIGHT        :: 1.0
+    MOVES_WEIGHT          :: 1.0
+    EMPTY_VERTICES_WEIGHT :: 1.0
+
+    // score
+    score := SCORE_WEIGHT * cast(f32) g.score
+    fmt.printf("|score: %v, ", score)
+
+    // Captures
+    captures := CAPTURE_WEIGHT * cast(f32) card(compute_possible_captures(g))
+    fmt.printf("captures: %v, ", captures)
+
+    // Possible Moves
+    possible := MOVES_WEIGHT * cast(f32) len(legal_moves(g))
+    fmt.printf("possible: %v, ", possible)
+
+    // Connected Component Size from Jaguar
+    visited: bit_set[0..<NUM_VERTS] = {g.jaguar}
+    neighbors := visited
+
+    for neighbors != {} {
+        next: bit_set[0..<NUM_VERTS]
+        for v in neighbors {
+            for to in adjacencies[v] {
+                if g.board[to] == .None do next += {to}
+            }
+        }
+        neighbors = next - visited
+        visited += neighbors
+    }
+
+    empty := EMPTY_VERTICES_WEIGHT * cast(f32) card(visited) - 1
+    fmt.printf("empty: %v| = ", empty)
+
+    evaluation = score + captures + possible + empty
+    fmt.printf("%v\n", evaluation)
+    return evaluation
+}
 
 import "core:fmt"
 import "core:nbio"
@@ -835,14 +875,11 @@ import rl "vendor:raylib"
 [ ] implement computer AI
 
 @BUGS:
-[ ] move sound playing after game over
-[ ] possible moves not being displayed for enemy team
+[ ] on dogs victory the status message flashes wrongly for one frame
 
 @REFACTOR:
 [ ] all configs in ui
 [ ] rules button parent should be restart button
-[ ] retain board square state for rendering
-[ ] collapse data into game_state and input structs
 [ ] render_highlight_around does not seem useful
 [ ] recompute rects, triangles, and lines for rendering the board only on resize
 */
