@@ -77,6 +77,17 @@ update :: proc() {
         }
         return
     }
+    
+        
+    slider :: proc(id: UI_Kind, hover: UI_Flags, active: bool) -> (clicked: bool) {
+        if active && rl.CheckCollisionPointCircle(mouse, rect_from_ui_elem(id)) {
+            ui.flags  += {hover}
+            clicked = rl.IsMouseButtonPressed(.LEFT)
+        } else {
+            ui.flags -= {hover}
+        }
+        return
+    }
 
     in_rules := .Render_Rules in ui.flags
     in_cpu := .CPU in ui.flags
@@ -445,6 +456,16 @@ render_button :: proc(id: UI_Kind, label: cstring, thickness: f32, hover: bool) 
     rl.DrawTextEx(ui.assets.font, label, rl.Vector2{w, h}, font_size, 0, color2);
 }
 
+render_slider :: proc(id: UI_Kind, label: cstring, hover: bool) {
+    before := rect_from_ui_elem(id) 
+    before.width *= 0.5
+    after := before
+    after.x += after.width
+    rl.DrawRectangleRec(before, config.fg_color)
+    rl.DrawRectangleRec(after,  config.rules_color)
+    size := ui.vertex_size * 1.1 if hover else ui.vertex_size
+    rl.DrawCircleV({after.x, after.y}, size, config.fg_color)
+}
 render_highlight_around_rect :: proc(rect: rl.Rectangle, thickness: f32, color: rl.Color) {
     rect := rect
     rect.x -= thickness
