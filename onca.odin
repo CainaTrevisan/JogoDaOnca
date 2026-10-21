@@ -43,6 +43,9 @@ init_game :: proc() {
     rl.InitAudioDevice()
     init_assets()
     append(&history, game)
+
+    ui.slider[.BGM_Slider] = 0.5
+    ui.slider[.SFX_Slider] = 0.5
 }
 
 close_game :: proc() {
@@ -77,12 +80,12 @@ update :: proc() {
         }
         return
     }
-    
-        
-    slider :: proc(id: UI_Kind, hover: UI_Flags, active: bool) -> (clicked: bool) {
-        if active && rl.CheckCollisionPointCircle(mouse, rect_from_ui_elem(id)) {
+
+    slider :: proc(id: UI_Kind, sid: Slider_Kind, hover: UI_Flags, active: bool) -> (clicked: bool) {
+        pos := ui.elem[id].pos + ui.elem[id].size * ui.slider[sid]
+        if active && rl.CheckCollisionPointCircle(mouse, pos, config.vertex_size * 2 * ui.unit) {
             ui.flags  += {hover}
-            clicked = rl.IsMouseButtonPressed(.LEFT)
+            clicked = rl.IsMouseButtonDown(.LEFT)
         } else {
             ui.flags -= {hover}
         }
@@ -90,7 +93,7 @@ update :: proc() {
     }
 
     in_rules := .Render_Rules in ui.flags
-    in_cpu := .CPU in ui.flags
+    in_cpu   := .CPU in ui.flags
     in_board := !in_rules && !in_cpu
 
     toggle :: proc(player: ^Player_Kind) {
@@ -102,6 +105,23 @@ update :: proc() {
     if button(.CPU_Button,     .CPU_Hover,     !in_rules) do ui.flags ~= {.CPU}
     if button(.Jaguar_Button,  .Jaguar_Hover,  in_cpu)    do toggle(&players[0])
     if button(.Dog_Button,     .Dog_Hover,     in_cpu)    do toggle(&players[1])
+
+    if slider(.BGM_Slider, .BGM_Slider, .BGM_Hover, in_cpu) {
+        e := ui.elem[.BGM_Slider]
+        new_pos := clamp(mouse.x, e.pos.x, e.pos.x + e.size.x)
+        volume := (new_pos - e.pos.x) / e.size.x
+        ui.slider[.BGM_Slider] = volume
+        rl.SetMusicVolume(ui.assets.bgm, volume)
+    }
+
+    if slider(.SFX_Slider, .SFX_Slider, .SFX_Hover, in_cpu) {
+        e := ui.elem[.SFX_Slider]
+        new_pos := clamp(mouse.x, e.pos.x, e.pos.x + e.size.x)
+        volume := (new_pos - e.pos.x) / e.size.x
+        ui.slider[.SFX_Slider] = volume
+        rl.SetSoundVolume(ui.assets.sfx_capture, volume)
+        rl.SetSoundVolume(ui.assets.sfx_move, volume)
+    }
 
     if .Restart in ui.flags {
         drag_from        = -1
@@ -456,16 +476,18 @@ render_button :: proc(id: UI_Kind, label: cstring, thickness: f32, hover: bool) 
     rl.DrawTextEx(ui.assets.font, label, rl.Vector2{w, h}, font_size, 0, color2);
 }
 
-render_slider :: proc(id: UI_Kind, label: cstring, hover: bool) {
-    before := rect_from_ui_elem(id) 
-    before.width *= 0.5
+render_slider :: proc(id: UI_Kind, sid: Slider_Kind, label: cstring, hover: bool) {
+    before := rect_from_ui_elem(id)
     after := before
-    after.x += after.width
+    before.width *= ui.slider[sid]
+    after.width *= 1 - ui.slider[sid]
+    after.x += before.width
     rl.DrawRectangleRec(before, config.fg_color)
     rl.DrawRectangleRec(after,  config.rules_color)
-    size := ui.vertex_size * 1.1 if hover else ui.vertex_size
-    rl.DrawCircleV({after.x, after.y}, size, config.fg_color)
+    size := ui.vertex_size * 2.2 if hover else ui.vertex_size * 1.7
+    rl.DrawCircleV({after.x, after.y + after.height * 0.5}, size, config.fg_color)
 }
+
 render_highlight_around_rect :: proc(rect: rl.Rectangle, thickness: f32, color: rl.Color) {
     rect := rect
     rect.x -= thickness
@@ -573,6 +595,9 @@ render_cpu_options :: proc() {
     render_button(.CPU_Button,    "Voltar", config.line_size, .CPU_Hover    in ui.flags)
     render_button(.Jaguar_Button, jag_text, config.line_size, .Jaguar_Hover in ui.flags)
     render_button(.Dog_Button,    dog_text, config.line_size, .Dog_Hover    in ui.flags)
+
+    render_slider(.BGM_Slider, .BGM_Slider, "", .BGM_Hover in ui.flags)
+    render_slider(.SFX_Slider, .SFX_Slider, "", .SFX_Hover in ui.flags)
 
     font_size: f32 = ui.unit * config.rules_font_size
     e := ui.elem[.Jaguar_Button]
@@ -682,6 +707,7 @@ render_status :: proc () {
 // ----------------------------------------------------------------------------
 // UI System
 // ----------------------------------------------------------------------------
+Slider_Kind  :: enum { BGM_Slider, SFX_Slider }
 UI_Kind :: enum {
     Screen,
     Turn_Mesg,
@@ -696,6 +722,8 @@ UI_Kind :: enum {
     CPU_Button,
     Jaguar_Button,
     Dog_Button,
+    BGM_Slider,
+    SFX_Slider,
 }
 
 UI_Elem :: struct {
@@ -718,6 +746,8 @@ UI_Flags :: enum {
     Dog,
     Dogs_Won,
     Mute_BGM,
+    BGM_Hover,
+    SFX_Hover,
 }
 
 ui: struct {
@@ -728,6 +758,7 @@ ui: struct {
     dog_size:    f32,
     flags:       bit_set[UI_Flags],
     elem:        [UI_Kind]UI_Elem,
+    slider:      [Slider_Kind]f32,
     using assets: Assets,
 }
 
@@ -779,8 +810,11 @@ layout_ui :: proc() {
     ui.elem[.Rules_Button]   = {parent = .Board,         size = {w, h},           offset = {4*u - w, y} }
     ui.elem[.CPU_Button]     = {parent = .Rules_Button,  size = {w, h},           offset = {0, -u*0.5}  }
     ui.elem[.Restart_Button] = {parent = .Board,         size = {w + u*0.07, h},  offset = {0, y}       }
-    ui.elem[.Jaguar_Button]  = {parent = .Board,         size = {w + u * 0.3, h}, offset = {0, u*2}     }
+
+    ui.elem[.Jaguar_Button]  = {parent = .Board,         size = {w + u * 0.3, h}, offset = {0, u}     }
     ui.elem[.Dog_Button]     = {parent = .Jaguar_Button, size = {w + u * 0.3, h}, offset = {0, u*0.5}   }
+    ui.elem[.BGM_Slider]     = {parent = .Dog_Button,    size = {2*u, 0.12*u},    offset = {0, u}   }
+    ui.elem[.SFX_Slider]     = {parent = .BGM_Slider,    size = {2*u, 0.12*u},    offset = {0, u}   }
 
     for &e in ui.elem do e.pos = e.offset + ui.elem[e.parent].pos
 }
