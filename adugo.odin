@@ -853,7 +853,7 @@ minimax :: proc(g: Game, depth: i8, hist: ^[dynamic]Game, alpha := f32(-INF), be
     best_move = moves[0]
 
     distance_between_points :: proc(a, b: rl.Vector2) -> f32 {
-        return math.sqrt(math.pow2_f32(b.x - a.x) + math.pow2_f32(b.y - a.y))
+        return math.sqrt(math.pow2_f32(int(b.x - a.x)) + math.pow2_f32(int(b.y - a.y)))
     }
 
     Scored :: struct { move: Jump, key: f32 }
