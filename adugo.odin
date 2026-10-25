@@ -1169,15 +1169,20 @@ import rl "vendor:raylib"
 @IMPROVEMENTS
 [ ] Better Colors
 [ ] reorder code
+[ ] after computer move dragged human piece should not be dropped
 
 @FEATURES
+[ ] Initial screen with player selection
 [ ] Implement images for the rules
+[ ] Animations that draw attention for game turn
 [ ] Implement Skip button after captures ???
 [ ] Change highlight color for piece that could be captured on a possible move
 [ ] animation for piece capture @VISUAL
 [ ] implement networking
 
 @BUGS:
+[ ] Defaults not working with empty config file (on windows)
+[ ] 
 
 @REFACTOR:
 [ ] render_highlight_around does not seem useful
