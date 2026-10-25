@@ -76,6 +76,7 @@ update :: proc() {
 
     widget :: proc(id: UI_Kind, enabled: bool) -> (hit: bool) {
         e := ui.elem[id]
+        rect := rect_from_ui_elem(id)
         if enabled && rl.CheckCollisionPointRec(mouse, rect_from_ui_elem(id)) {
             ui.hot = id
             if rl.IsMouseButtonPressed(.LEFT) {
@@ -98,8 +99,8 @@ update :: proc() {
     if widget(.CPU_Button,     !in_rules) do ui.flags ~= {.CPU}
     if widget(.Jaguar_Button,  in_cpu)    do toggle(&players[0])
     if widget(.Dog_Button,     in_cpu)    do toggle(&players[1])
-    if widget(.Plus_Button,    in_cpu)    do ui.depth = clamp(ui.depth + 1, 0, 8)
-    if widget(.Minus_Button,   in_cpu)    do ui.depth = clamp(ui.depth - 1, 0, 8)
+    if widget(.Plus_Button,    in_cpu)    do ui.depth = clamp(ui.depth + 1, 0, CPU_MAX_DEPTH)
+    if widget(.Minus_Button,   in_cpu)    do ui.depth = clamp(ui.depth - 1, 0, CPU_MAX_DEPTH)
 
     if widget(.BGM_Slider, in_cpu) {
         rl.SetMusicVolume(ui.assets.bgm, ui.value[.BGM_Slider])
@@ -170,7 +171,7 @@ update :: proc() {
         if ai_job.thread == nil {
             ai_job.game    = game
             ai_job.history = slice.clone_to_dynamic(history[:])
-            ai_job.depth   = clamp(ui.depth, 0, 10)
+            ai_job.depth   = clamp(ui.depth, 0, CPU_MAX_DEPTH)
             ai_job.started = time.now()
             ai_job.thread  = thread.create_and_start_with_data(&ai_job, ai_proc)
         }
@@ -834,7 +835,9 @@ ai_proc :: proc(data: rawptr) {
     _, job.result = minimax(job.game, job.depth, &job.history)
 }
 
+CPU_MAX_DEPTH :: 9
 INF :: math.F32_MAX
+
 minimax :: proc(g: Game, depth: i8, hist: ^[dynamic]Game, alpha := f32(-INF), beta := f32(INF)) -> (evaluation: f32, best_move: Jump) {
     g := g
     alpha, beta := alpha, beta
@@ -997,7 +1000,7 @@ init_assets :: proc() {
 // ----------------------------------------------------------------------------
 // Config System
 // ----------------------------------------------------------------------------
-CONFIG_PATH :: "onca.cfg"
+CONFIG_PATH :: "adugo.cfg"
 
 config: Config
 Config :: struct {
@@ -1130,7 +1133,7 @@ update_configs :: proc() {
         ui.value[.BGM_Slider] = config.bgm_volume * 0.01
         ui.value[.SFX_Slider] = config.sfx_volume * 0.01
         ui.value[.AI_Slider]  = clamp(f32(config.ai_sleep) / 2000, 0.0, 1.0)
-        ui.depth = cast(i8) clamp(config.minimax_depth, 0, 8)
+        ui.depth = cast(i8) clamp(config.minimax_depth, 0, CPU_MAX_DEPTH)
 
         rl.SetMusicVolume(ui.assets.bgm,         clamp(ui.value[.BGM_Slider], 0.0, 1.0))
         rl.SetSoundVolume(ui.assets.sfx_capture, clamp(ui.value[.SFX_Slider], 0.0, 1.0))
