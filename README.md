@@ -1,4 +1,4 @@
-[Adugo](https://github.com/CainaTrevisan/JogoDaOnca/blob/main/adugo.png)
+![Adugo](https://github.com/CainaTrevisan/JogoDaOnca/blob/main/adugo.png)
 
 # Jogo da Onça
 Versão digital do jogo de tabuleiro [Jogo da Onça](https://pt.wikipedia.org/wiki/Jogo_da_on%C3%A7a)
