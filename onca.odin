@@ -98,8 +98,8 @@ update :: proc() {
     if widget(.CPU_Button,     !in_rules) do ui.flags ~= {.CPU}
     if widget(.Jaguar_Button,  in_cpu)    do toggle(&players[0])
     if widget(.Dog_Button,     in_cpu)    do toggle(&players[1])
-    if widget(.Plus_Button,    in_cpu)    do ui.depth = clamp(ui.depth + 1, 0, 7)
-    if widget(.Minus_Button,   in_cpu)    do ui.depth = clamp(ui.depth - 1, 0, 7)
+    if widget(.Plus_Button,    in_cpu)    do ui.depth = clamp(ui.depth + 1, 0, 8)
+    if widget(.Minus_Button,   in_cpu)    do ui.depth = clamp(ui.depth - 1, 0, 8)
 
     if widget(.BGM_Slider, in_cpu) {
         rl.SetMusicVolume(ui.assets.bgm, ui.value[.BGM_Slider])
@@ -1130,7 +1130,7 @@ update_configs :: proc() {
         ui.value[.BGM_Slider] = config.bgm_volume * 0.01
         ui.value[.SFX_Slider] = config.sfx_volume * 0.01
         ui.value[.AI_Slider]  = clamp(f32(config.ai_sleep) / 2000, 0.0, 1.0)
-        ui.depth = cast(i8) clamp(config.minimax_depth, 0, 7)
+        ui.depth = cast(i8) clamp(config.minimax_depth, 0, 8)
 
         rl.SetMusicVolume(ui.assets.bgm,         clamp(ui.value[.BGM_Slider], 0.0, 1.0))
         rl.SetSoundVolume(ui.assets.sfx_capture, clamp(ui.value[.SFX_Slider], 0.0, 1.0))
